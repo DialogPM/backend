@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO vault_records (account_id, record_id, data, size, seq) VALUES (?, ?, ?, ?, ?)\n             ON DUPLICATE KEY UPDATE data = VALUES(data), size = VALUES(size), seq = VALUES(seq)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "22dc38983a9008253118d152d70347b7ff100afa83c5233b87622928a95ff29b"
+}

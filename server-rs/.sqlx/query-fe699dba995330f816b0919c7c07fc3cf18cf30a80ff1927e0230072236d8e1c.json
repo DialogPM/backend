@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO recovery_challenges (challenge, account_id, expires_at) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "fe699dba995330f816b0919c7c07fc3cf18cf30a80ff1927e0230072236d8e1c"
+}

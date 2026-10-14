@@ -1,0 +1,54 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT push_provider AS `push_provider: String`, push_token AS `push_token: String`, push_tag AS `push_tag: String`, voip_token AS `voip_token: String` FROM devices\n         WHERE account_id = ? AND device_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "push_provider: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | BINARY",
+          "max_size": 64
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "push_token: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "BINARY",
+          "max_size": 16384
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "push_tag: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "BINARY",
+          "max_size": 256
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "voip_token: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "BINARY",
+          "max_size": 2048
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "d325c285aa50120d187c82aa6c2ccaf2e4c42cbb30eb2223ba947fad662a5da3"
+}

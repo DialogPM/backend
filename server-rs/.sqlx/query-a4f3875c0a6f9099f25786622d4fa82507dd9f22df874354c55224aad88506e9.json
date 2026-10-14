@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT device_id AS `device_id: i64` FROM devices WHERE account_id = ? FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "device_id: i64",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL | PRIMARY_KEY | UNSIGNED | NO_DEFAULT_VALUE",
+          "max_size": 3
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a4f3875c0a6f9099f25786622d4fa82507dd9f22df874354c55224aad88506e9"
+}

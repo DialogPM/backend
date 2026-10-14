@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT key_id AS `key_id: i64`, public_key, signature FROM device_one_time_keys\n         WHERE account_id = ? AND device_id = ? AND kind = ? ORDER BY key_id LIMIT 1 FOR UPDATE SKIP LOCKED",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key_id: i64",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | UNSIGNED | NO_DEFAULT_VALUE",
+          "max_size": 10
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "public_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 4096
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "signature",
+        "type_info": {
+          "type": "VarString",
+          "flags": "BINARY",
+          "max_size": 256
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "2d3967c441e30208bf78b914643a0d7d055d33079056fc408c84dfa053cf2c3c"
+}

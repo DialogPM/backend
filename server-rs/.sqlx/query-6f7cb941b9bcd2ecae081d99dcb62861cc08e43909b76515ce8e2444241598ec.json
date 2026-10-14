@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO device_one_time_keys (account_id, device_id, kind, key_id, public_key, signature)\n             VALUES (?, ?, ?, ?, ?, ?)\n             ON DUPLICATE KEY UPDATE public_key = VALUES(public_key), signature = VALUES(signature)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "6f7cb941b9bcd2ecae081d99dcb62861cc08e43909b76515ce8e2444241598ec"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE chat_groups SET metadata = ?, avatar_id = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "21ba2bc50d8076a313fd433c62285787a45aa3cb8a5652b98d8409f63761e3b9"
+}

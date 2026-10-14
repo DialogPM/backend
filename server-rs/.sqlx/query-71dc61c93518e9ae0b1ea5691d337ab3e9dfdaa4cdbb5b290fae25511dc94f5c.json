@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM chat_groups WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "71dc61c93518e9ae0b1ea5691d337ab3e9dfdaa4cdbb5b290fae25511dc94f5c"
+}

@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT COALESCE(SUM(size), 0) AS `used!: String` FROM attachments WHERE owner_id = ? AND created_at > ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "used!: String",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "NOT_NULL | BINARY",
+          "max_size": 42
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4b07af42de084e4d5ec40da3c80ffb8ece6309dad5ad391fdba6f47d2f8ed500"
+}

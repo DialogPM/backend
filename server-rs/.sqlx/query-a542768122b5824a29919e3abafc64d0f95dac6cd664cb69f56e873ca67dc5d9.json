@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT uid_ciphertext, role AS `role: i64`, joined_revision FROM group_members_v2 WHERE group_id = ? ORDER BY joined_revision, uid_ciphertext",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid_ciphertext",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | PRIMARY_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 65
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "role: i64",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL | UNSIGNED | NO_DEFAULT_VALUE",
+          "max_size": 3
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "joined_revision",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a542768122b5824a29919e3abafc64d0f95dac6cd664cb69f56e873ca67dc5d9"
+}

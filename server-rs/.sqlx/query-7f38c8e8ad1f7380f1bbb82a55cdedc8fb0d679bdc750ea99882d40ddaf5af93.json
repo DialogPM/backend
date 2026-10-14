@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT encrypted_username FROM username_links WHERE handle = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "encrypted_username",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 128
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7f38c8e8ad1f7380f1bbb82a55cdedc8fb0d679bdc750ea99882d40ddaf5af93"
+}

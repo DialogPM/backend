@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT size FROM kt_state WHERE id = 1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "size",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d4aa46c3de45e333fdc5601addd29912fe2b1a3b83a027e469546fba860c6ce8"
+}

@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT secret_hash, status AS `status: i64`, expires_at FROM login_requests WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "secret_hash",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 32
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "status: i64",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL | UNSIGNED",
+          "max_size": 3
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "expires_at",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | MULTIPLE_KEY | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b1975887f9ad2eabe90026a65ddd50a1c8d8caaf615d84e339a0b914b97eee6a"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM groups_v2 WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "0b03f67dcc3f5c36c797382b7da75aa7c0bc3e67ff8b541d31badbdf010adc07"
+}

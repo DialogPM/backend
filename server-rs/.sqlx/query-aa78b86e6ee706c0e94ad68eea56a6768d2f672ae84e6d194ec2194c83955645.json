@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO device_signed_keys (account_id, device_id, kind, key_id, public_key, signature)\n             VALUES (?, ?, ?, ?, ?, ?)\n             ON DUPLICATE KEY UPDATE key_id = VALUES(key_id), public_key = VALUES(public_key), signature = VALUES(signature)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "aa78b86e6ee706c0e94ad68eea56a6768d2f672ae84e6d194ec2194c83955645"
+}

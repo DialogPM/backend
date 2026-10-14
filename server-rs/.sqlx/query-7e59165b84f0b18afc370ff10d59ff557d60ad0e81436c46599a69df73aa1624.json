@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT GET_LOCK('chatapp_migrations', 60)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "GET_LOCK('chatapp_migrations', 60)",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "BINARY",
+          "max_size": 1
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "7e59165b84f0b18afc370ff10d59ff557d60ad0e81436c46599a69df73aa1624"
+}

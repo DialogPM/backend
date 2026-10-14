@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM login_requests WHERE account_id = ? AND expires_at < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "d3a757d35f8a89915a2c70bb3ed47b7e30cde84b56be51c9d7b039fba6996cdf"
+}

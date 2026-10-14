@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO devices\n         (account_id, device_id, name, platform, registration_id, token_hash, created_at, last_seen_at)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "6b3e1f426630c386fbb5398ccb981d678b4d8eb586097806c4a633d97cb2d240"
+}

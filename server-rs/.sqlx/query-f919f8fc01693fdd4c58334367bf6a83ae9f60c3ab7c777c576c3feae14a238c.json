@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE devices SET voip_token = NULL, voip_token_hash = NULL\n                 WHERE account_id = ? AND device_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "f919f8fc01693fdd4c58334367bf6a83ae9f60c3ab7c777c576c3feae14a238c"
+}

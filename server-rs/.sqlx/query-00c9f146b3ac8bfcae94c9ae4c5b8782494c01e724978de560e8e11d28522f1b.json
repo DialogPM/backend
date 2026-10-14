@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE spam_reports SET resolved_at = COALESCE(resolved_at, ?) WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "00c9f146b3ac8bfcae94c9ae4c5b8782494c01e724978de560e8e11d28522f1b"
+}

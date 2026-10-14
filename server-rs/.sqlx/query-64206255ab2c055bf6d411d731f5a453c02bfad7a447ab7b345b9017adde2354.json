@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE attachments SET state = ?, uploaded_at = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "64206255ab2c055bf6d411d731f5a453c02bfad7a447ab7b345b9017adde2354"
+}

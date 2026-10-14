@@ -1,0 +1,34 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT g.id AS `id: String`, g.revision FROM chat_groups g\n         JOIN group_members m ON m.group_id = g.id WHERE m.account_id = ? ORDER BY g.created_at, g.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: String",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | PRIMARY_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 144
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "revision",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "077976d591332f16c7334cfc7c34e534cb28f4c1009d624ff07c69b7b39f164e"
+}

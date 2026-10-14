@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "REPLACE INTO admin_settings (name, value, updated_at) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "46f549d024c31931e588dce731c0afda52936a9cb8b28d58e82197527296483b"
+}

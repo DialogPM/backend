@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE account_numbers SET deleted_at = ? WHERE account_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "d708cf9344a58419392df6727374baa1acae67fc8ff816dd9c2339043bf6c0fd"
+}

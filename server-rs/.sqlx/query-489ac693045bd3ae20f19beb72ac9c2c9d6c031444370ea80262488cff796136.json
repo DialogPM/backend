@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE groups_v2 SET revision = ?, attributes = ?, settings = ?, edit_access = ?, members_access = ?, updated_at = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "489ac693045bd3ae20f19beb72ac9c2c9d6c031444370ea80262488cff796136"
+}

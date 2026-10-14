@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT account_id AS `account_id: String`, identity_key, created_at FROM kt_leaves WHERE idx = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id: String",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | MULTIPLE_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 144
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "identity_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 64
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "76b61b6a300c30cb501dadcd78257246347fd580e11ced735e551f0eaede0664"
+}

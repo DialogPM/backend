@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT d.account_id AS `account_id: String`, d.device_id AS `device_id: i64`, d.registration_id AS `registration_id: i64` FROM devices d\n         JOIN group_members m ON m.account_id = d.account_id\n         WHERE m.group_id = ? ORDER BY d.account_id, d.device_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id: String",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | PRIMARY_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 144
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "device_id: i64",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL | PRIMARY_KEY | UNSIGNED | NO_DEFAULT_VALUE",
+          "max_size": 3
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "registration_id: i64",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | UNSIGNED | NO_DEFAULT_VALUE",
+          "max_size": 10
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "51b31778ffb5bdc25128cbb75f5b81457374b848da2fe5c8602a2a86c0150b7d"
+}

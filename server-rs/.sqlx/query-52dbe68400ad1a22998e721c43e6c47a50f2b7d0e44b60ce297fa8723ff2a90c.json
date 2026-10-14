@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE accounts SET vault_bytes = GREATEST(0, vault_bytes + ?) WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "52dbe68400ad1a22998e721c43e6c47a50f2b7d0e44b60ce297fa8723ff2a90c"
+}

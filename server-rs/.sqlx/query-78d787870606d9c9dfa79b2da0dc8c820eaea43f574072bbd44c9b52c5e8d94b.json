@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE login_requests SET status = ?\n         WHERE id = ? AND account_id = ? AND status = ? AND expires_at >= ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "78d787870606d9c9dfa79b2da0dc8c820eaea43f574072bbd44c9b52c5e8d94b"
+}

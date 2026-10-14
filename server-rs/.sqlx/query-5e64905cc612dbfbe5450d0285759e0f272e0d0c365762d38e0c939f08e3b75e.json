@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT handle AS `handle: String` FROM username_links WHERE account_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "handle: String",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | PRIMARY_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 144
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5e64905cc612dbfbe5450d0285759e0f272e0d0c365762d38e0c939f08e3b75e"
+}

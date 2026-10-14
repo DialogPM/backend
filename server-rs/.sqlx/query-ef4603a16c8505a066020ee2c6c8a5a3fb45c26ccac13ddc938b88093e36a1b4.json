@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT difficulty AS `difficulty: i64` FROM registration_challenges WHERE challenge = ? AND expires_at >= ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "difficulty: i64",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL | UNSIGNED | NO_DEFAULT_VALUE",
+          "max_size": 3
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ef4603a16c8505a066020ee2c6c8a5a3fb45c26ccac13ddc938b88093e36a1b4"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO username_links (handle, account_id, encrypted_username, created_at) VALUES (?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "328a31b9e19c297898170f998561f8c93ccd144f41fe4e0ff5106f1698721f3d"
+}

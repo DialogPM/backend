@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM recovery_challenges WHERE account_id = ? AND expires_at < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "a4f92ad0b2ab5a46db4f6beeca4671d2d9164f018dd21434800938b32369c0fd"
+}

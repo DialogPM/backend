@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT banned_at FROM accounts WHERE id = ? FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "banned_at",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "MULTIPLE_KEY",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "483f63131c5fafa4265ec9301234469b21ae056cfeb9e39802bda145898cf69e"
+}

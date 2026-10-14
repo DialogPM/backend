@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE devices SET revocation_hash = ? WHERE account_id = ? AND device_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "b594048bdb5cc6a7211742277c3db2542d341f03e94ecdbe0404430943003f47"
+}

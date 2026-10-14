@@ -1,0 +1,145 @@
+# Dialog server stack: MySQL 8.4, MinIO (with web console) and the server (server-rs/).
+#
+#   cp .env.example .env   # then edit the secrets
+#   docker compose up -d --build
+#
+# The server listens on CHATAPP_PUBLISH (default 127.0.0.1:8080); put a TLS reverse proxy
+# in front of it (see README.md). The MinIO console is on 127.0.0.1:9001.
+
+name: chatapp
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-chatapp}
+      MYSQL_USER: ${MYSQL_USER:-chatapp}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max-allowed-packet=64M
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  minio:
+    # minio/minio is no longer published on Docker Hub; Chainguard builds MinIO from source.
+    image: cgr.dev/chainguard/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${CHATAPP_MINIO_ACCESS_KEY:?set CHATAPP_MINIO_ACCESS_KEY in .env}
+      MINIO_ROOT_PASSWORD: ${CHATAPP_MINIO_SECRET_KEY:?set CHATAPP_MINIO_SECRET_KEY in .env}
+    ports:
+      - "${CHATAPP_MINIO_CONSOLE_PUBLISH:-127.0.0.1:9001}:9001" # web console (not exposed publicly)
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      # No mc/curl/grep in the image: probe the liveness endpoint with bash only.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /minio/health/live HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && read -r status <&3 && [[ $$status == *' 200 '* ]]"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  server:
+    build:
+      context: ./server-rs
+    image: chatapp-server:latest
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CHATAPP_LISTEN_ADDR: ":8080"
+      CHATAPP_SERVER_SECRET: ${CHATAPP_SERVER_SECRET:?set CHATAPP_SERVER_SECRET in .env}
+      CHATAPP_MYSQL_DSN: ${MYSQL_USER:-chatapp}:${MYSQL_PASSWORD}@tcp(mysql:3306)/${MYSQL_DATABASE:-chatapp}
+      CHATAPP_MINIO_ENDPOINT: minio:9000
+      CHATAPP_MINIO_ACCESS_KEY: ${CHATAPP_MINIO_ACCESS_KEY}
+      CHATAPP_MINIO_SECRET_KEY: ${CHATAPP_MINIO_SECRET_KEY}
+      CHATAPP_MINIO_USE_SSL: "false"
+    ports:
+      - "${CHATAPP_PUBLISH:-127.0.0.1:8080}:8080"
+    volumes:
+      # Optional: Firebase service account JSON for mobile push notifications, mounted
+      # read-only. Put it at ./secrets/fcm-service-account.json (readable by UID 65532) and
+      # set CHATAPP_FCM_CREDENTIALS_FILE=/run/secrets/chatapp/fcm-service-account.json in
+      # .env. The APNs VoIP key (apns-auth-key.p8, CHATAPP_APNS_KEY_FILE) goes in the same
+      # directory. Without them the directory is empty and push stays disabled
+      # (docs/PUSH-SETUP.md).
+      - ${CHATAPP_SECRETS_DIR:-./secrets}:/run/secrets/chatapp:ro
+      # Optional: backup status for the admin API overview (docs/ADMIN-API.md). The host's
+      # backup script writes status.json into this directory; set
+      # CHATAPP_BACKUP_STATUS_FILE=/run/backup-status/status.json in .env.
+      # - /var/lib/dialog-backup-status:/run/backup-status:ro
+      # Optional: commit shown in the admin overview (a deploy script can write it).
+      # - ./DEPLOYED_COMMIT:/app/DEPLOYED_COMMIT:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/chatserver", "-healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # TURN relay for voice calls (optional): docker compose --profile calls up -d
+  # Set CHATAPP_TURN_SECRET and CHATAPP_TURN_URLS in .env (see .env.example). Uses the host
+  # network because TURN needs a range of UDP ports; open 3478/udp+tcp and 49160-49400/udp.
+  coturn:
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    profiles: ["calls"]
+    network_mode: host
+    # The secret is checked here rather than with ${VAR:?}: compose interpolates every service,
+    # so a required variable would break `docker compose up` for setups without calls.
+    entrypoint:
+      - sh
+      - -c
+      - '[ -n "$$0" ] || { echo "set CHATAPP_TURN_SECRET in .env" >&2; exit 1; }; exec docker-entrypoint.sh --static-auth-secret="$$0" "$$@"'
+      - ${CHATAPP_TURN_SECRET:-}
+    command:
+      - -n
+      - --log-file=stdout
+      - --use-auth-secret
+      - --realm=${CHATAPP_TURN_REALM:-chatapp}
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49400
+      - --fingerprint
+      - --no-cli
+      - --no-multicast-peers
+      - --no-tlsv1
+      - --no-tlsv1_1
+      # Abuse limits: concurrent allocations per credential (one per expiry window and
+      # account, see server-rs/src/api/calls.rs) and in total, and bandwidth per session
+      # (~3 Mbit/s: enough for 720p video plus audio).
+      - --user-quota=12
+      - --total-quota=1200
+      - --max-bps=375000
+      # Never relay into private / loopback networks (the relay must not reach the LAN).
+      - --denied-peer-ip=0.0.0.0-0.255.255.255
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=100.64.0.0-100.127.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+      - --denied-peer-ip=::1
+      - --denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+      - --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+
+volumes:
+  mysql-data:
+  minio-data:

@@ -1,0 +1,74 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT device_id AS `device_id: i64`, name AS `name: String`, name_enc, platform AS `platform: String`, created_at, last_seen_at FROM devices WHERE account_id = ? ORDER BY device_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "device_id: i64",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL | PRIMARY_KEY | UNSIGNED | NO_DEFAULT_VALUE",
+          "max_size": 3
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 512
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name_enc",
+        "type_info": {
+          "type": "VarString",
+          "flags": "BINARY",
+          "max_size": 512
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "platform: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 64
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "last_seen_at",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | MULTIPLE_KEY | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "834ffdeaa025930ec2b0b1923f2365b08c57c57e8586de56be7ce724cfdf386a"
+}

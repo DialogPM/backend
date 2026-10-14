@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE accounts SET auth_key_hash = ?, kdf = ?, wrapped_account_key = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "74c0e94e627a2fcefc95aebaa025831a9912d93faefa5b515110388c704f90cc"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO username_reservations (username, account_id, expires_at)\n         SELECT username, id, ? FROM accounts WHERE id = ? AND username IS NOT NULL\n         ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), expires_at = VALUES(expires_at)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "411afcfa7a3255f0cff723589c4e019fab91594d52608f8e7e5c8036aaf17c39"
+}

@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT RELEASE_LOCK('chatapp_migrations') AS released",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "released",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "BINARY",
+          "max_size": 1
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "fbde6cd8d4e45648f6e665d003328e3e523aa0f76cdd04eb242906e2f3596f1a"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO attachments (id, owner_id, kind, size, state, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "2f0c6b70d9b86bc69a527b866ae4c0559aed33462978bec2f946791ea82e8c6e"
+}

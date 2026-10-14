@@ -1,0 +1,104 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT number AS `number: String`, created_at, phone AS `phone: String`,\n         discoverable_by_phone AS `discoverable_by_phone: bool`, privacy_last_seen AS `privacy_last_seen: String`,\n         username AS `username: String`,\n         kdf AS `kdf: String`, wrapped_account_key, login_approval AS `login_approval: bool`\n         FROM accounts WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "number: String",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | UNIQUE_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 64
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "created_at",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | MULTIPLE_KEY | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "phone: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "BINARY",
+          "max_size": 64
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "discoverable_by_phone: bool",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL",
+          "max_size": 1
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "privacy_last_seen: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | BINARY",
+          "max_size": 64
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "username: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "UNIQUE_KEY | BINARY",
+          "max_size": 128
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "kdf: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 4096
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "wrapped_account_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 1024
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "login_approval: bool",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL",
+          "max_size": 1
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c076931ec23932587f1ca22f3be9c9c5ae89974fe538123fd9a9816dac26f129"
+}

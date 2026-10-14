@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT unidentified_access_key FROM accounts WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "unidentified_access_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "BINARY",
+          "max_size": 16
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "eed850adbb2fd1b422af18bbd7dfc548379e1cb857a2b11c55e044a6e26052cb"
+}

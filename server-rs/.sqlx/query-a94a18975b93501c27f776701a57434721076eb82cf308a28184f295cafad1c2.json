@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT account_id AS `account_id: String`, intro, requested_at FROM group_join_requests WHERE group_id = ? ORDER BY requested_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id: String",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | PRIMARY_KEY | MULTIPLE_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 144
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "intro",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB | BINARY",
+          "max_size": 65535
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "requested_at",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "a94a18975b93501c27f776701a57434721076eb82cf308a28184f295cafad1c2"
+}

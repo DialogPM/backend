@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE accounts SET privacy_last_seen = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "20a152e6c362678a8fda6bdc0d0d16cd1dbd4ff5ee9dd61fa3110c0c6c44c16a"
+}

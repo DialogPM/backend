@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO registration_challenges (challenge, difficulty, expires_at) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "229b10019a2624ecea3f68515158b1c9fc30fe7cce8004dafd2fd0fe3c83b80e"
+}

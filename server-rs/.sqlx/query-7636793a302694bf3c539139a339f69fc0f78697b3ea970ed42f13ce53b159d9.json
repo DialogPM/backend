@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT record_id AS `record_id: String`, data, seq AS `seq: i64` FROM vault_records WHERE account_id = ? AND seq > ? ORDER BY seq LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "record_id: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | PRIMARY_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 512
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "data",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB | BINARY",
+          "max_size": 16777215
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "seq: i64",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | UNIQUE_KEY | UNSIGNED | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "7636793a302694bf3c539139a339f69fc0f78697b3ea970ed42f13ce53b159d9"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO profiles (account_id, data, avatar_id, updated_at) VALUES (?, ?, ?, ?)\n         ON DUPLICATE KEY UPDATE data = VALUES(data), avatar_id = VALUES(avatar_id), updated_at = VALUES(updated_at)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "869eb039b1b31cf3cc2bf340f18f9b1fa890d71b5db65b28b5d8d96699b3522a"
+}

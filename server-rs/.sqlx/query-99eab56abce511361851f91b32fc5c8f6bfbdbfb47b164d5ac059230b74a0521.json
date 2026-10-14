@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM group_bans WHERE group_id = ? AND account_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "99eab56abce511361851f91b32fc5c8f6bfbdbfb47b164d5ac059230b74a0521"
+}

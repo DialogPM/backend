@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT kdf AS `kdf: String` FROM accounts WHERE number = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kdf: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 4096
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0b85648b70524581b687fcdedc32d2064a617efae111262b167d680a42b525d9"
+}

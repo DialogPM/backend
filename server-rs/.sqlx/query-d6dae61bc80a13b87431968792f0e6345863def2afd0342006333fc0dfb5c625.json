@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT totp_secret FROM accounts WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "totp_secret",
+        "type_info": {
+          "type": "VarString",
+          "flags": "BINARY",
+          "max_size": 128
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "d6dae61bc80a13b87431968792f0e6345863def2afd0342006333fc0dfb5c625"
+}

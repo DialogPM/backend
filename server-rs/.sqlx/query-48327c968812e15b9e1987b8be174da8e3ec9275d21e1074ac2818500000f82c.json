@@ -1,0 +1,104 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT id AS `id: String`, number AS `number: String`, username AS `username: String`, created_at, banned_at,\n                ban_reason AS `ban_reason: String`, login_approval AS `login_approval: bool`,\n                (totp_secret IS NOT NULL) AS `totp_enabled!: i64`, discoverable_by_phone AS `discoverable_by_phone: bool`\n         FROM accounts WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: String",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | PRIMARY_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 144
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "number: String",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | UNIQUE_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 64
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "username: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "UNIQUE_KEY | BINARY",
+          "max_size": 128
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | MULTIPLE_KEY | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "banned_at",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "MULTIPLE_KEY",
+          "max_size": 20
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "ban_reason: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "BINARY",
+          "max_size": 2000
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "login_approval: bool",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL",
+          "max_size": 1
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "totp_enabled!: i64",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | BINARY",
+          "max_size": 1
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "discoverable_by_phone: bool",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL",
+          "max_size": 1
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "48327c968812e15b9e1987b8be174da8e3ec9275d21e1074ac2818500000f82c"
+}

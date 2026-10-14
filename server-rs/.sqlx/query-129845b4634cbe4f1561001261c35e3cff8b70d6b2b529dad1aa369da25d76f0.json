@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT data, avatar_id AS `avatar_id: String`, updated_at FROM profiles WHERE account_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "data",
+        "type_info": {
+          "type": "Blob",
+          "flags": "NOT_NULL | BLOB | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 65535
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "avatar_id: String",
+        "type_info": {
+          "type": "String",
+          "flags": "BINARY",
+          "max_size": 128
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_at",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "129845b4634cbe4f1561001261c35e3cff8b70d6b2b529dad1aa369da25d76f0"
+}

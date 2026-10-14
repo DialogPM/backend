@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE accounts SET discoverable_by_phone = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "f32d1ed1275a6c73eb605b7d649a3dda2abef632040d8b39716056d6a77eeb28"
+}

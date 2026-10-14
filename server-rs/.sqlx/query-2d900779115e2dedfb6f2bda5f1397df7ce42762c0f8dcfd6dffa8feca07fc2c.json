@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT revision, `change`, signature FROM group_changes_v2 WHERE group_id = ? AND revision > ? AND revision >= ?\n         ORDER BY revision LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revision",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | PRIMARY_KEY | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "change",
+        "type_info": {
+          "type": "Blob",
+          "flags": "NOT_NULL | BLOB | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 16777215
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "signature",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 64
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2d900779115e2dedfb6f2bda5f1397df7ce42762c0f8dcfd6dffa8feca07fc2c"
+}

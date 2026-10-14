@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM registration_challenges WHERE challenge = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "5b262f24f1523718df2488e60f258de63dd594096d6fe70936589776be85eede"
+}

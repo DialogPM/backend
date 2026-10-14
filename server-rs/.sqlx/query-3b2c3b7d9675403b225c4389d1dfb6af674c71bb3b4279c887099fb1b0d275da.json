@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT number AS `number: String` FROM accounts WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "number: String",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | UNIQUE_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 64
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3b2c3b7d9675403b225c4389d1dfb6af674c71bb3b4279c887099fb1b0d275da"
+}

@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT state AS `state: i64` FROM attachments WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state: i64",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL | MULTIPLE_KEY | UNSIGNED",
+          "max_size": 3
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a0de3a296dc3100b7c2f74f19f8c03ea5aa53113c98ca788d8935735c6b89414"
+}

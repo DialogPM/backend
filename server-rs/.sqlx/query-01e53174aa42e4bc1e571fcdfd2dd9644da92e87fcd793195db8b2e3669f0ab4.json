@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM devices WHERE account_id = ? AND device_id = ? AND last_seen_at < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "01e53174aa42e4bc1e571fcdfd2dd9644da92e87fcd793195db8b2e3669f0ab4"
+}

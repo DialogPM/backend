@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO login_requests\n         (id, account_id, secret_hash, name, device_name, platform, registration_id, status, created_at, expires_at)\n         VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "81c9eb34fc67dc9da61f718f8e8b9e8bb24fe3f711056cf34e641a3dddbb4326"
+}

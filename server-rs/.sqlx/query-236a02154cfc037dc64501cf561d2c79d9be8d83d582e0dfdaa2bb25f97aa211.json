@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO group_invites (group_id, token_hash, approval, preview, created_by, created_at)\n         VALUES (?, ?, ?, ?, ?, ?)\n         ON DUPLICATE KEY UPDATE token_hash = VALUES(token_hash), approval = VALUES(approval), preview = VALUES(preview),\n             created_by = VALUES(created_by), created_at = VALUES(created_at)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "236a02154cfc037dc64501cf561d2c79d9be8d83d582e0dfdaa2bb25f97aa211"
+}

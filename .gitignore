@@ -1,0 +1,16 @@
+/target/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+._*
+/secrets/
+DEPLOYED_COMMIT
+
+# Credentials never go into the repository (the push test keys are throwaway).
+*.p8
+!/server-rs/src/push/testdata/*.p8
+*.p12
+*.key
+*service-account*.json

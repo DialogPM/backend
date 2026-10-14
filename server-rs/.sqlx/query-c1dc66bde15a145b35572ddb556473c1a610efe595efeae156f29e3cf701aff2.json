@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT auth_key_hash FROM accounts WHERE id = ? FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "auth_key_hash",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 32
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c1dc66bde15a145b35572ddb556473c1a610efe595efeae156f29e3cf701aff2"
+}

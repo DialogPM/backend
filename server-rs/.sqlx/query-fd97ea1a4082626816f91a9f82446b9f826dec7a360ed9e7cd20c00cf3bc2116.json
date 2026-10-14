@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT day AS `day: i64`, metric AS `metric: String`, value FROM daily_stats WHERE day >= ? AND day <= ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "day: i64",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | NO_DEFAULT_VALUE",
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "metric: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | PRIMARY_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 128
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "value",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fd97ea1a4082626816f91a9f82446b9f826dec7a360ed9e7cd20c00cf3bc2116"
+}

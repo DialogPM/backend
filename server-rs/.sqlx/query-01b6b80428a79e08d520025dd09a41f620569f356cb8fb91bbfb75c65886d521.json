@@ -1,0 +1,34 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT d.account_id AS `account_id: String`, d.device_id AS `device_id: i64` FROM devices d\n         WHERE d.last_seen_at < ? AND EXISTS (\n             SELECT 1 FROM devices o WHERE o.account_id = d.account_id AND o.device_id <> d.device_id\n               AND (o.last_seen_at > d.last_seen_at\n                    OR (o.last_seen_at = d.last_seen_at AND o.device_id < d.device_id)))\n         LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id: String",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | PRIMARY_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 144
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "device_id: i64",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL | PRIMARY_KEY | UNSIGNED | NO_DEFAULT_VALUE",
+          "max_size": 3
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "01b6b80428a79e08d520025dd09a41f620569f356cb8fb91bbfb75c65886d521"
+}

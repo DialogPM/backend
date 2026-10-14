@@ -1,0 +1,11 @@
+[build]
+# Share build artifacts (libsignal etc.) with the main workspace.
+target-dir = "../target"
+
+[env]
+# sqlx::query! checks every query against the schema at compile time. Builds use the saved
+# query descriptions in .sqlx/ (no database needed, also in Docker). After changing a query or
+# the schema, refresh them against a migrated database (cargo install sqlx-cli once):
+#   DATABASE_URL=mysql://user:pass@127.0.0.1:3307/chatapp_rs cargo sqlx prepare -- --tests
+# and commit .sqlx/ with the change.
+SQLX_OFFLINE = "true"

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM group_join_requests WHERE group_id = ? AND account_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "979081e39e8d63e5dad97d473edbd79492148946486fc28807e1b615f041dcbb"
+}

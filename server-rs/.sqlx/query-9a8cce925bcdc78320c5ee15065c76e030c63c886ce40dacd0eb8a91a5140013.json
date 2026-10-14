@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM admin_settings WHERE name = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "9a8cce925bcdc78320c5ee15065c76e030c63c886ce40dacd0eb8a91a5140013"
+}

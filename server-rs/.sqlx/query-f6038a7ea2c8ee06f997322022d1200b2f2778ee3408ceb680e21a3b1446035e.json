@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO group_changes_v2 (group_id, revision, `change`, signature, created_at) VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "f6038a7ea2c8ee06f997322022d1200b2f2778ee3408ceb680e21a3b1446035e"
+}

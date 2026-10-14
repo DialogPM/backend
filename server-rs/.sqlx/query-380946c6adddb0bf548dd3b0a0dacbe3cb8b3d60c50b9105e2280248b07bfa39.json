@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT IGNORE INTO device_revocations (account_id, device_id, secret_hash, revoked_at)\n         SELECT account_id, device_id, revocation_hash, ? FROM devices\n         WHERE account_id = ? AND (? IS NULL OR device_id = ?) AND revocation_hash IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "380946c6adddb0bf548dd3b0a0dacbe3cb8b3d60c50b9105e2280248b07bfa39"
+}

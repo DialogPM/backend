@@ -1,0 +1,54 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT uid_ciphertext, role AS `role: i64`, added_by, added_revision FROM group_pending_v2 WHERE group_id = ? ORDER BY added_revision, uid_ciphertext",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid_ciphertext",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | PRIMARY_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 65
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "role: i64",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL | UNSIGNED | NO_DEFAULT_VALUE",
+          "max_size": 3
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "added_by",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 65
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "added_revision",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d601145e325e0c7afbeb296a6ea538347fd950a36373678a9ca585d97e219629"
+}

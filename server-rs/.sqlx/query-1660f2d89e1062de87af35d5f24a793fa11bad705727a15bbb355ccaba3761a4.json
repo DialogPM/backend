@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE spam_reports SET resolved_at = ?, resolution = 'dismissed' WHERE id = ? AND resolved_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "1660f2d89e1062de87af35d5f24a793fa11bad705727a15bbb355ccaba3761a4"
+}

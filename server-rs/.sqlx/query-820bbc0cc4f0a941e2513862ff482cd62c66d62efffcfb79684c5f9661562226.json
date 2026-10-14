@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT account_id AS `account_id: String` FROM username_reservations WHERE username = ? AND expires_at >= ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id: String",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 144
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "820bbc0cc4f0a941e2513862ff482cd62c66d62efffcfb79684c5f9661562226"
+}

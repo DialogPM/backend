@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO spam_reports (reporter_id, reported_id, envelope_ids, reason, report_count, created_at, updated_at)\n         VALUES (?, ?, ?, ?, 1, ?, ?)\n         ON DUPLICATE KEY UPDATE envelope_ids = COALESCE(VALUES(envelope_ids), envelope_ids),\n             reason = COALESCE(VALUES(reason), reason), report_count = report_count + 1,\n             updated_at = VALUES(updated_at), resolved_at = NULL, resolution = NULL, resolution_note = NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "a9fb0ab160481b12a5598e859acc60531f6008d9d15075d34c639fd8857bf7d8"
+}

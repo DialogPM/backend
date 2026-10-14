@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO accounts\n         (id, number, auth_key_hash, kdf, wrapped_account_key, identity_key, recovery_public_key, created_at)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "7b40a9acb5732152c0b3cd1ed3584dd6ee67aee7b64c9130e544016c84f659fd"
+}

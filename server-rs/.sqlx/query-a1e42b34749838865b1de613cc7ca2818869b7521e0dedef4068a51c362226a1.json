@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO phone_codes (account_id, phone, code_hash, attempts, expires_at)\n         VALUES (?, ?, ?, 0, ?)\n         ON DUPLICATE KEY UPDATE phone = VALUES(phone), code_hash = VALUES(code_hash), attempts = 0, expires_at = VALUES(expires_at)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "a1e42b34749838865b1de613cc7ca2818869b7521e0dedef4068a51c362226a1"
+}

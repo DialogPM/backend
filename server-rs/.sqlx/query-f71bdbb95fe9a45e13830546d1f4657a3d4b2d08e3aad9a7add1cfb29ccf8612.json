@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO kt_state (id, size) VALUES (1, 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "f71bdbb95fe9a45e13830546d1f4657a3d4b2d08e3aad9a7add1cfb29ccf8612"
+}

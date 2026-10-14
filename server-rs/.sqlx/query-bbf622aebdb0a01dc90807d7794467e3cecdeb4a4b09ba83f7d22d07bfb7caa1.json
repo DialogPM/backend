@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM envelopes WHERE id = ? AND account_id = ? AND device_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "bbf622aebdb0a01dc90807d7794467e3cecdeb4a4b09ba83f7d22d07bfb7caa1"
+}

@@ -1,0 +1,34 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT device_id AS `device_id: i64`, registration_id AS `registration_id: i64` FROM devices WHERE account_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "device_id: i64",
+        "type_info": {
+          "type": "Tiny",
+          "flags": "NOT_NULL | PRIMARY_KEY | UNSIGNED | NO_DEFAULT_VALUE",
+          "max_size": 3
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "registration_id: i64",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | UNSIGNED | NO_DEFAULT_VALUE",
+          "max_size": 10
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ff0c0e283a7f17bc5870cb4ea3d7355ec82aa0fae0df6030423309fd25d125ea"
+}

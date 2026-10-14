@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM group_pending_v2 WHERE group_id = ? AND uid_ciphertext = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "676a1e7885db27f8db3916a2cb0ad5f7519abe8668c07b0b50ca53054c43d9fe"
+}

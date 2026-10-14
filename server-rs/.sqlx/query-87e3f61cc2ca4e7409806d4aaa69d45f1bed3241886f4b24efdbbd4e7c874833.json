@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO chat_groups\n         (id, revision, metadata, avatar_id, created_by, created_at, only_admins_send, only_admins_edit,\n          disappearing_seconds, hide_members, member_names) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "87e3f61cc2ca4e7409806d4aaa69d45f1bed3241886f4b24efdbbd4e7c874833"
+}

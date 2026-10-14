@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM device_revocations WHERE revoked_at < ? LIMIT ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "56105d06fd08020cfa821d3d9f9edd06bca2ef3a122a8ea840ce61f912b681d1"
+}

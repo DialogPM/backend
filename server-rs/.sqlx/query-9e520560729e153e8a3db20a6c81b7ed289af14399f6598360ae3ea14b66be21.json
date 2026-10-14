@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT account_id FROM group_bans WHERE group_id = ? AND account_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | PRIMARY_KEY | MULTIPLE_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 144
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9e520560729e153e8a3db20a6c81b7ed289af14399f6598360ae3ea14b66be21"
+}

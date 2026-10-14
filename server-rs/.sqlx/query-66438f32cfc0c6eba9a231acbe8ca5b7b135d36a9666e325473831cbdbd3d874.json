@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE spam_reports SET resolution = 'banned', resolution_note = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "66438f32cfc0c6eba9a231acbe8ca5b7b135d36a9666e325473831cbdbd3d874"
+}

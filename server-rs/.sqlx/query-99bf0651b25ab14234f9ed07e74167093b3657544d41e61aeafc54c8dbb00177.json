@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT identity_key FROM accounts WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "identity_key",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 64
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "99bf0651b25ab14234f9ed07e74167093b3657544d41e61aeafc54c8dbb00177"
+}

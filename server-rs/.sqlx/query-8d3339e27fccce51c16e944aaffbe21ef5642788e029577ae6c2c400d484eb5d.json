@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT privacy_last_seen AS `privacy_last_seen: String` FROM accounts WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "privacy_last_seen: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | BINARY",
+          "max_size": 64
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8d3339e27fccce51c16e944aaffbe21ef5642788e029577ae6c2c400d484eb5d"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE devices SET name = ?, name_enc = ? WHERE account_id = ? AND device_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "ba21e6e57b38ade963ce9f43975fa48c1ba8476a0d27d0de65decaf75e846328"
+}

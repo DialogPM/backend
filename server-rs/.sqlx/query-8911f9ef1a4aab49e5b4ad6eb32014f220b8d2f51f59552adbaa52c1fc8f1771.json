@@ -1,0 +1,34 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT totp_pending, totp_secret FROM accounts WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "totp_pending",
+        "type_info": {
+          "type": "VarString",
+          "flags": "BINARY",
+          "max_size": 128
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "totp_secret",
+        "type_info": {
+          "type": "VarString",
+          "flags": "BINARY",
+          "max_size": 128
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "8911f9ef1a4aab49e5b4ad6eb32014f220b8d2f51f59552adbaa52c1fc8f1771"
+}

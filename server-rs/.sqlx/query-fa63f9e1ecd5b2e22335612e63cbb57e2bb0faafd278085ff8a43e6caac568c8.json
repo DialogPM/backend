@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO daily_stats (day, metric, value) VALUES (?, ?, ?)\n             ON DUPLICATE KEY UPDATE value = value + VALUES(value)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "fa63f9e1ecd5b2e22335612e63cbb57e2bb0faafd278085ff8a43e6caac568c8"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO kt_leaves (idx, account_id, identity_key, created_at) VALUES (?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "3d10449dff848161047f3fb9a0443d5188061ce47ff0e155bcab523570204d55"
+}

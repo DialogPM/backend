@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO group_bans (group_id, account_id, banned_by, banned_at) VALUES (?, ?, ?, ?)\n         ON DUPLICATE KEY UPDATE banned_by = VALUES(banned_by), banned_at = VALUES(banned_at)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "33bc547d08d752ad77d832547844070f0ed09871ef29a56547c9728b9aaf908f"
+}

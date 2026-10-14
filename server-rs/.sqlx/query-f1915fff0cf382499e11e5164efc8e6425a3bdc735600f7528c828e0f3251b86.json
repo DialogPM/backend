@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO group_pending_v2 (group_id, uid_ciphertext, role, added_by, added_revision) VALUES (?, ?, ?, ?, ?)\n             ON DUPLICATE KEY UPDATE role = VALUES(role), added_by = VALUES(added_by), added_revision = VALUES(added_revision)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "f1915fff0cf382499e11e5164efc8e6425a3bdc735600f7528c828e0f3251b86"
+}

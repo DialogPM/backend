@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT COUNT(*) AS `n?: i64`, CAST(COALESCE(SUM(LENGTH(content)), 0) AS SIGNED) AS `b?: i64`, MIN(server_timestamp) AS `o?: i64` FROM envelopes",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n?: i64",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | BINARY",
+          "max_size": 21
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "b?: i64",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | BINARY",
+          "max_size": 21
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "o?: i64",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "BINARY",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "188da397c53f9bd0fcf499df4047dd444aea9dd276a02e7ad97c139ae360d915"
+}

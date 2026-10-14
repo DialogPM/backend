@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM device_one_time_keys WHERE account_id = ? AND device_id = ? AND kind = ? AND key_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "c0552c7cdde33380b4668c57a9b983195e9c792835a496f8ebf1a41e3df6f5da"
+}

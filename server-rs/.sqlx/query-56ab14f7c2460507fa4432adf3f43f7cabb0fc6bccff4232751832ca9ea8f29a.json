@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE accounts SET banned_at = NULL, ban_reason = NULL WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "56ab14f7c2460507fa4432adf3f43f7cabb0fc6bccff4232751832ca9ea8f29a"
+}

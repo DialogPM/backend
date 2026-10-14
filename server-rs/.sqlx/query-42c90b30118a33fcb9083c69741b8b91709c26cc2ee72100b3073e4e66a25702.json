@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT reported_id AS `reported_id: String` FROM spam_reports WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "reported_id: String",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | PRIMARY_KEY | MULTIPLE_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 144
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "42c90b30118a33fcb9083c69741b8b91709c26cc2ee72100b3073e4e66a25702"
+}

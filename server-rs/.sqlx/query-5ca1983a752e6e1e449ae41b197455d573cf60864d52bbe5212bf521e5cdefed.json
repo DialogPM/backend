@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE group_members SET role = ? WHERE group_id = ? AND account_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "5ca1983a752e6e1e449ae41b197455d573cf60864d52bbe5212bf521e5cdefed"
+}

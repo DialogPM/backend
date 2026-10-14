@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "2127a7bd213afb75daef1134c6726aa79bca0b9b36c8abd306eca7ea9dfcd411"
+}

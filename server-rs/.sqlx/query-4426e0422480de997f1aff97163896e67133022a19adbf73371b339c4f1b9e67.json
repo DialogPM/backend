@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE chat_groups SET only_admins_send = ?, only_admins_edit = ?,\n         disappearing_seconds = ?, hide_members = ?, member_names = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "4426e0422480de997f1aff97163896e67133022a19adbf73371b339c4f1b9e67"
+}

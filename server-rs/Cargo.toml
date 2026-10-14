@@ -1,0 +1,62 @@
+[package]
+name = "chatserver"
+version = "1.0.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+description = "Dialog relay server (Rust port of server/)"
+
+# Standalone for now: not a member of the client workspace.
+[workspace]
+
+[dependencies]
+axum = { version = "0.8", features = ["ws", "macros"] }
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tower-http = { version = "0.6", features = ["catch-panic", "set-header"] }
+futures-util = "0.3"
+bytes = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "tokio", "service"] }
+tower = { version = "0.5", features = ["util"] }
+httpdate = "1"
+socket2 = "0.5"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "mysql", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+base64 = "0.22"
+sha2 = "0.10"
+sha1 = "0.10"
+hmac = "0.12"
+hkdf = "0.12"
+aes-gcm = "0.10"
+subtle = "2"
+ed25519-dalek = "2"
+rand = "0.9"
+hex = "0.4"
+uuid = { version = "1", features = ["v4"] }
+url = "2"
+regex = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# http2: APNs accepts HTTP/2 only (negotiated with ALPN).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "http2"] }
+rust-s3 = { version = "0.35", default-features = false, features = ["tokio-rustls-tls"] }
+jsonwebtoken = "9"
+tempfile = "3"
+thiserror = "2"
+libsignal-protocol = { git = "https://github.com/signalapp/libsignal", tag = "v0.103.1" }
+libsignal-core = { git = "https://github.com/signalapp/libsignal", tag = "v0.103.1" }
+zkgroup = { git = "https://github.com/signalapp/libsignal", tag = "v0.103.1" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# statvfs for the admin overview's disk usage.
+libc = "0.2"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

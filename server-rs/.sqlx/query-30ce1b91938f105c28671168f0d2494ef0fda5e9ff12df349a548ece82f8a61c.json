@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT username AS `username: String` FROM accounts WHERE id = ? FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "username: String",
+        "type_info": {
+          "type": "VarString",
+          "flags": "UNIQUE_KEY | BINARY",
+          "max_size": 128
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "30ce1b91938f105c28671168f0d2494ef0fda5e9ff12df349a548ece82f8a61c"
+}

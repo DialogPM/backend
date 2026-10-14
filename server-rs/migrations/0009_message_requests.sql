@@ -1,0 +1,4 @@
+-- Message requests (client side, see crates/chat-core/src/engine/requests.rs). No schema
+-- change: presence subscriptions now require the target's unidentified access key
+-- (accounts.unidentified_access_key, 0006), which clients share only with conversations
+-- they accepted. Kept so the version numbers stay contiguous.

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE chat_groups SET revision = revision + 1 WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "a1d98ef75aca9009c8a454c3d4a9c7e12bf8cf79f99c317c07de52a42a25383a"
+}

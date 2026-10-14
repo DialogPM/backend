@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO group_members_v2 (group_id, uid_ciphertext, role, joined_revision) VALUES (?, ?, ?, ?)\n             ON DUPLICATE KEY UPDATE role = VALUES(role), joined_revision = VALUES(joined_revision)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "00392fa431f2fe3b9642179e3080724332380bdeea810e48a671cc66fde9dd15"
+}

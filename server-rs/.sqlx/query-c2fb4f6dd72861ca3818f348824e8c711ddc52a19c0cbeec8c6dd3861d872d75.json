@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE kt_state SET size = ? WHERE id = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "c2fb4f6dd72861ca3818f348824e8c711ddc52a19c0cbeec8c6dd3861d872d75"
+}

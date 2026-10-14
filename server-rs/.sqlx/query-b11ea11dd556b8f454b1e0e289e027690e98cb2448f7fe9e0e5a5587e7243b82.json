@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT version AS `version: i64` FROM schema_migrations",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version: i64",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | NO_DEFAULT_VALUE",
+          "max_size": 11
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b11ea11dd556b8f454b1e0e289e027690e98cb2448f7fe9e0e5a5587e7243b82"
+}

@@ -1,0 +1,34 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT totp_secret, totp_last_step FROM accounts WHERE id = ? FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "totp_secret",
+        "type_info": {
+          "type": "VarString",
+          "flags": "BINARY",
+          "max_size": 128
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "totp_last_step",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL",
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "5ee08572b531141a42707527f56e4e51a57840eaa213f054de92d783ab5b324f"
+}
