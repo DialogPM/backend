@@ -121,13 +121,11 @@ pub async fn sealed_send(
     Path(account_id): Path<String>,
     body: Body,
 ) -> ApiResult {
-    st.rate_limit(
-        &format!("sealed:ip:{}", st.client_ip(&headers, peer)),
-        st.limits.sealed_ip,
-    )?;
+    let ip = st.client_ip(&headers, peer);
+    st.rate_limit(&format!("sealed:ip:{ip}"), st.limits.sealed_ip)?;
     let dest = path_uuid("account_id", &account_id)?;
     check_unidentified_access(&st, &headers, &dest).await?;
-    messages::send_messages(&st, None, &account_id, body).await
+    messages::send_messages(&st, None, &format!("ip:{ip}"), &account_id, body).await
 }
 
 /// Serves pre-key bundles to a sender holding the access key, so starting a session does not

@@ -90,6 +90,9 @@ pub async fn entries(
     RawQuery(q): RawQuery,
 ) -> ApiResult {
     limit(&st, &headers, peer)?;
+    // Every page lists up to 1000 account ids: a tighter budget than the proofs, enough for a
+    // client's one-time download of the log (self-monitoring).
+    st.rate_limit(&format!("kt-entries:ip:{}", st.client_ip(&headers, peer)), st.limits.kt_entries_ip)?;
     let start = query_int(q.as_deref(), "start", 0, 0, i64::MAX)?;
     let end = query_int(q.as_deref(), "end", start + MAX_ENTRIES, 0, i64::MAX)?;
     if end < start || end - start > MAX_ENTRIES {

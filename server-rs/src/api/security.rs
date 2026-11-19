@@ -246,10 +246,15 @@ pub async fn create_login_request(
     sqlx::query!("DELETE FROM login_requests WHERE account_id = ? AND expires_at < ?", account, now)
         .execute(&mut **tx)
         .await?;
-    let pending = sqlx::query!("SELECT COUNT(*) AS `n!: i64` FROM login_requests WHERE account_id = ?", account)
-        .fetch_one(&mut **tx)
-        .await?
-        .n;
+    // Only requests still waiting count: denied ones (kept until the requester polls them, at
+    // most until they expire) must not let someone who knows the password lock the owner out
+    // of logging in by piling up requests it never polls.
+    let pending: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM login_requests WHERE account_id = ? AND status = ?")
+            .bind(account)
+            .bind(LOGIN_PENDING)
+            .fetch_one(&mut **tx)
+            .await?;
     if pending >= MAX_PENDING_LOGIN_REQUESTS {
         return Err(conflict("too many logins are waiting for approval"));
     }

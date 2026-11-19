@@ -71,9 +71,15 @@ pub async fn by_number(
 
 pub async fn by_account(
     State(st): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path(account_id): Path<String>,
 ) -> ApiResult {
+    // Resolves an account id (seen in groups, envelopes or the key transparency log) to its
+    // login number: same budget as the other directory lookups.
+    st.rate_limit(
+        &format!("dir-number:acct:{}", p.account),
+        st.limits.directory_number,
+    )?;
     let id = path_uuid("account_id", &account_id)?;
     write_directory_entry(&st, "id", &id).await
 }

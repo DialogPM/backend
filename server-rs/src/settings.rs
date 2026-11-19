@@ -19,6 +19,8 @@ pub struct Settings {
     pub attachment_max_bytes: i64,
     /// Linked devices not seen for this many days are unlinked; 0 disables.
     pub inactive_device_days: i64,
+    /// Undelivered messages (queued envelopes) are deleted after this many days.
+    pub message_ttl_days: i64,
     /// Raise the proof-of-work automatically during a registration surge (adaptive_pow.rs).
     pub pow_adaptive: bool,
     /// Registrations per hour above which the difficulty goes up.
@@ -35,6 +37,7 @@ impl Settings {
             max_devices: c.max_devices,
             attachment_max_bytes: c.attachment_max_bytes,
             inactive_device_days: c.inactive_device_days,
+            message_ttl_days: c.message_ttl_days,
             pow_adaptive: true,
             pow_adaptive_threshold: 100,
             // ~10 s on a phone (each bit doubles the work of the default 20 bits).
@@ -43,12 +46,13 @@ impl Settings {
     }
 }
 
-pub const NAMES: [&str; 8] = [
+pub const NAMES: [&str; 9] = [
     "registration_enabled",
     "pow_bits",
     "max_devices",
     "attachment_max_bytes",
     "inactive_device_days",
+    "message_ttl_days",
     "pow_adaptive",
     "pow_adaptive_threshold",
     "pow_adaptive_max_bits",
@@ -61,6 +65,7 @@ pub fn range(name: &str) -> Option<(i64, i64)> {
         "max_devices" => (1, 20),
         "attachment_max_bytes" => (1 << 20, 2 << 30),
         "inactive_device_days" => (7, 365),
+        "message_ttl_days" => (1, 365),
         "pow_adaptive_threshold" => (10, 100_000),
         "pow_adaptive_max_bits" => (0, 28),
         _ => return None,
@@ -107,6 +112,7 @@ fn apply(s: &mut Settings, name: &str, v: &Value) -> bool {
         ("max_devices", v) if v.is_i64() => s.max_devices = v.as_i64().unwrap_or_default(),
         ("attachment_max_bytes", v) if v.is_i64() => s.attachment_max_bytes = v.as_i64().unwrap_or_default(),
         ("inactive_device_days", v) if v.is_i64() => s.inactive_device_days = v.as_i64().unwrap_or_default(),
+        ("message_ttl_days", v) if v.is_i64() => s.message_ttl_days = v.as_i64().unwrap_or_default(),
         ("pow_adaptive", Value::Bool(b)) => s.pow_adaptive = *b,
         ("pow_adaptive_threshold", v) if v.is_i64() => s.pow_adaptive_threshold = v.as_i64().unwrap_or_default(),
         ("pow_adaptive_max_bits", v) if v.is_i64() => s.pow_adaptive_max_bits = v.as_i64().unwrap_or_default(),
@@ -225,6 +231,7 @@ fn value_of(s: &Settings, name: &str) -> Value {
         "max_devices" => s.max_devices.into(),
         "attachment_max_bytes" => s.attachment_max_bytes.into(),
         "inactive_device_days" => s.inactive_device_days.into(),
+        "message_ttl_days" => s.message_ttl_days.into(),
         "pow_adaptive" => Value::Bool(s.pow_adaptive),
         "pow_adaptive_threshold" => s.pow_adaptive_threshold.into(),
         "pow_adaptive_max_bits" => s.pow_adaptive_max_bits.into(),

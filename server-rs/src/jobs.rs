@@ -38,7 +38,7 @@ pub async fn run_once(st: &AppState) {
     match delete_batched(
         st,
         "DELETE FROM envelopes WHERE server_timestamp < ? LIMIT ?",
-        now - st.cfg.message_ttl_days * DAY_MS,
+        now - st.settings.get().message_ttl_days * DAY_MS,
     )
     .await
     {
@@ -87,6 +87,28 @@ pub async fn run_once(st: &AppState) {
             Ok(_) => {}
             Err(e) => warn!(error = %e, "unlink inactive devices failed"),
         }
+    }
+
+    // Group v2 change log: GET /v2/groups/changes serves a caller changes from its own join
+    // (or invitation) revision on, so changes below the oldest member's or invitee's revision
+    // are never served again and can go.
+    match sqlx::query(
+        "DELETE c FROM group_changes_v2 c
+         JOIN (SELECT c2.group_id, c2.revision FROM group_changes_v2 c2
+               JOIN (SELECT group_id, MIN(r) AS r FROM (
+                         SELECT group_id, joined_revision AS r FROM group_members_v2
+                         UNION ALL SELECT group_id, added_revision FROM group_pending_v2) x
+                     GROUP BY group_id) m ON m.group_id = c2.group_id
+               WHERE c2.revision < m.r LIMIT ?) d
+         ON d.group_id = c.group_id AND d.revision = c.revision",
+    )
+    .bind(CLEANUP_BATCH)
+    .execute(&st.db)
+    .await
+    {
+        Ok(r) if r.rows_affected() > 0 => debug!(count = r.rows_affected(), "compacted group v2 change logs"),
+        Ok(_) => {}
+        Err(e) => warn!(error = %e, "compact group v2 change logs failed"),
     }
 
     // Revocation records of removed devices (remote wipe), after a long time.

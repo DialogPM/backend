@@ -1,6 +1,6 @@
 //! 1:1 messages, the envelope queue and the WebSocket endpoint (API section 7).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use axum::body::Body;
 use axum::extract::ws::WebSocketUpgrade;
@@ -13,8 +13,10 @@ use sqlx::{MySql, MySqlPool, Transaction};
 
 use super::{no_content, query_int, reply};
 use crate::auth::Principal;
+use crate::db::RowExt;
 use crate::error::{
-    bad_request, conflict, gone, not_found, too_large, unauthorized, ApiError, ApiResult,
+    bad_request, conflict, gone, not_found, queue_full, too_large, unauthorized, ApiError,
+    ApiResult,
 };
 use crate::ids;
 use crate::push::Wake;
@@ -41,6 +43,64 @@ const DEFAULT_FETCH_LIMIT: i64 = 100;
 const MAX_FETCH_LIMIT: i64 = 1000;
 /// Bounds the size of one multi-row INSERT (256 KiB content each).
 const ENVELOPE_INSERT_BATCH: usize = 32;
+/// Most envelopes queued for one device (a device that never fetches would otherwise collect
+/// envelopes for message_ttl_days without bound). A 1:1 send to a full queue is refused with
+/// 507; group sends skip the full devices, as if their envelopes had expired.
+pub const MAX_QUEUED_PER_DEVICE: i64 = 10_000;
+
+/// Total content bytes of `envs`, for the per-sender storage budget (`send_bytes_sender`).
+pub fn content_bytes(envs: &[Envelope]) -> u32 {
+    envs.iter().fold(0u32, |n, e| n.saturating_add(e.content.len().min(u32::MAX as usize) as u32))
+}
+
+/// Charges `bytes` of stored content to `sender` (`acct:<id>` or `ip:<address>`).
+pub fn charge_sender(st: &AppState, sender: &str, bytes: u32) -> Result<(), ApiError> {
+    st.rate_limit_n(&format!("send-bytes:{sender}"), st.limits.send_bytes_sender, bytes)
+}
+
+/// The (account, device) pairs among the destinations of `envs` whose queue holds
+/// MAX_QUEUED_PER_DEVICE envelopes or more (one GROUP BY query per 500 devices, on the
+/// (account_id, device_id) index).
+pub async fn full_queues(
+    tx: &mut Transaction<'_, MySql>,
+    envs: &[Envelope],
+) -> Result<HashSet<(String, i64)>, sqlx::Error> {
+    let devices: BTreeSet<(&str, i64)> = envs
+        .iter()
+        .map(|e| (e.dest_account.as_str(), e.destination_device))
+        .collect();
+    let devices: Vec<(&str, i64)> = devices.into_iter().collect();
+    let mut full = HashSet::new();
+    for part in devices.chunks(500) {
+        let sql = format!(
+            "SELECT account_id, device_id FROM envelopes WHERE (account_id, device_id) IN ({})
+             GROUP BY account_id, device_id HAVING COUNT(*) >= ?",
+            vec!["(?, ?)"; part.len()].join(", ")
+        );
+        let mut q = sqlx::query(&sql);
+        for (a, d) in part {
+            q = q.bind(*a).bind(*d);
+        }
+        for r in q.bind(MAX_QUEUED_PER_DEVICE).fetch_all(&mut **tx).await? {
+            full.insert((r.string("account_id"), r.i64("device_id")));
+        }
+    }
+    Ok(full)
+}
+
+/// Drops the envelopes of `envs` whose destination queue is full; returns how many.
+pub async fn drop_for_full_queues(
+    tx: &mut Transaction<'_, MySql>,
+    envs: &mut Vec<Envelope>,
+) -> Result<usize, sqlx::Error> {
+    let full = full_queues(tx, envs).await?;
+    if full.is_empty() {
+        return Ok(0);
+    }
+    let before = envs.len();
+    envs.retain(|e| !full.contains(&(e.dest_account.clone(), e.destination_device)));
+    Ok(before - envs.len())
+}
 
 /// Wire representation of a message envelope.
 #[derive(Serialize, Clone, Debug)]
@@ -97,6 +157,12 @@ pub struct SendRequest {
     /// offline devices then get a high-priority call push carrying only this id (API 14).
     #[serde(default)]
     pub call_id: Option<String>,
+    /// Set by the sender's client on call signalling that follows an offer (ICE candidates,
+    /// answers...): stored and delivered like any message, but never announced by a push.
+    /// The offer's own call push already woke the device; a "New message" alert for these
+    /// would be wrong. Ignored on a call offer (`call_id`).
+    #[serde(default)]
+    pub no_push: bool,
 }
 
 pub fn validate_content(content: &[u8]) -> Result<(), ApiError> {
@@ -124,14 +190,17 @@ pub async fn send_message(
     Path(account_id): Path<String>,
     body: Body,
 ) -> ApiResult {
-    send_messages(&st, Some(&p), &account_id, body).await
+    let sender = format!("acct:{}", p.account);
+    send_messages(&st, Some(&p), &sender, &account_id, body).await
 }
 
 /// Stores and delivers a 1:1 message. `p` is None for sealed sender deliveries: the envelopes
-/// then carry no source and must all be sealed.
+/// then carry no source and must all be sealed. `sender` identifies the caller for the call
+/// offer limits (`acct:<id>`, or `ip:<address>` for sealed sends).
 pub async fn send_messages(
     st: &AppState,
     p: Option<&Principal>,
+    sender: &str,
     account_id: &str,
     body: Body,
 ) -> ApiResult {
@@ -143,6 +212,12 @@ pub async fn send_messages(
         Some(id) if crate::push::valid_call_id(id) => Wake::Call { call_id: id.to_string() },
         Some(_) => return Err(bad_request("invalid call_id")),
     };
+    if matches!(wake, Wake::Call { .. }) {
+        // A call offer rings the callee's phones (high-priority / VoIP push): bound how often
+        // one sender may ring anyone, and one destination in particular.
+        st.rate_limit(&format!("call:{sender}"), st.limits.call_sender)?;
+        st.rate_limit(&format!("call:{sender}:{dest}"), st.limits.call_pair)?;
+    }
     if req.messages.len() as i64 > MAX_DEVICE_ID {
         return Err(bad_request("too many messages"));
     }
@@ -162,6 +237,11 @@ pub async fn send_messages(
         }
         validate_content(&m.content)?;
         given.insert(m.device_id, m);
+    }
+
+    if !req.online {
+        let bytes = given.values().fold(0u32, |n, m| n.saturating_add(m.content.len() as u32));
+        charge_sender(st, sender, bytes)?;
     }
 
     let server_ts = crate::now_millis();
@@ -219,10 +299,18 @@ pub async fn send_messages(
         })
         .collect();
     if !req.online {
+        let full = full_queues(&mut tx, &envs).await?;
+        if !full.is_empty() {
+            let mut devices: Vec<i64> = full.iter().map(|(_, d)| *d).collect();
+            devices.sort_unstable();
+            return Err(queue_full("the recipient's message queue is full")
+                .with("full_devices", devices));
+        }
         insert_envelopes(&mut tx, &envs).await?;
     }
     tx.commit().await?;
-    deliver_wake(st, &envs, req.online, &wake);
+    let push = !req.no_push || matches!(wake, Wake::Call { .. });
+    deliver_wake(st, &envs, req.online, push.then_some(&wake));
     Ok(reply(
         StatusCode::OK,
         json!({"server_timestamp": server_ts}),
@@ -237,11 +325,11 @@ pub async fn send_messages(
 /// they would show "New message" on the phone for a message we wrote ourselves. The device
 /// fetches them at its next connection.
 pub fn deliver(st: &AppState, envs: &[Envelope], ephemeral: bool) {
-    deliver_wake(st, envs, ephemeral, &Wake::Message)
+    deliver_wake(st, envs, ephemeral, Some(&Wake::Message))
 }
 
-/// [`deliver`] announcing `wake` (a call offer) in the pushes.
-pub fn deliver_wake(st: &AppState, envs: &[Envelope], ephemeral: bool, wake: &Wake) {
+/// [`deliver`] announcing `wake` (a call offer) in the pushes; no push at all when None.
+pub fn deliver_wake(st: &AppState, envs: &[Envelope], ephemeral: bool, wake: Option<&Wake>) {
     crate::metrics::bump(crate::metrics::ENVELOPES_SENT, envs.len() as i64);
     for e in envs {
         let j = e.to_json();
@@ -255,10 +343,11 @@ pub fn deliver_wake(st: &AppState, envs: &[Envelope], ephemeral: bool, wake: &Wa
             st.hub.send_envelope(&e.dest_account, e.destination_device, &e.id, &j);
             continue;
         }
-        if st
+        let written = st
             .hub
-            .send_envelope(&e.dest_account, e.destination_device, &e.id, &j)
-        {
+            .send_envelope(&e.dest_account, e.destination_device, &e.id, &j);
+        let Some(wake) = wake else { continue };
+        if written {
             st.push
                 .notify_unless_acked(&e.dest_account, e.destination_device, &e.id, wake.clone());
         } else {

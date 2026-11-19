@@ -58,6 +58,10 @@ pub fn gone(msg: impl Into<String>) -> ApiError {
 pub fn too_large(msg: impl Into<String>) -> ApiError {
     ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large", msg)
 }
+/// A recipient's message queue is full (the sender is not at fault, so not 429).
+pub fn queue_full(msg: impl Into<String>) -> ApiError {
+    ApiError::new(StatusCode::INSUFFICIENT_STORAGE, "queue_full", msg)
+}
 pub fn rate_limited(wait: Duration) -> ApiError {
     let mut e = ApiError::new(
         StatusCode::TOO_MANY_REQUESTS,

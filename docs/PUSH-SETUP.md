@@ -19,7 +19,8 @@ the caller or the conversation:
   of its accounts the push is for (several accounts per phone, one open at a time).
 - The server sends a push when an envelope is stored for a device without an open WebSocket, or
   whose socket did not acknowledge it within 10 s (3 s for a call offer). At most one message push
-  per device per 10 s; one call push per call. The caller's app marks an offer with its call id;
+  per device per 10 s; one call push per device per 30 s, whatever the call id. The caller's
+  app marks an offer with its call id;
   the offer itself stays end-to-end encrypted.
 - Push tokens are never logged. Tokens that FCM / APNs report as invalid are deleted.
 - Do-not-disturb, muted chats and notification previews are client settings the server never

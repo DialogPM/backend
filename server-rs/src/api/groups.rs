@@ -872,6 +872,11 @@ pub async fn group_send(
         given.insert(key, rc.registration_id);
     }
 
+    if !req.online {
+        let bytes = (req.content.len() as u64 * given.len() as u64).min(u32::MAX as u64) as u32;
+        super::messages::charge_sender(&st, &format!("acct:{}", p.account), bytes)?;
+    }
+
     let server_ts = crate::now_millis();
     let mut attempt = 0;
     let envs = loop {
@@ -945,7 +950,7 @@ async fn send_tx(
             .with("stale", refs_json(&stale))
             .into());
     }
-    let envs: Vec<Envelope> = given
+    let mut envs: Vec<Envelope> = given
         .keys()
         .map(|(account, device)| Envelope {
             id: ids::new_uuid(),
@@ -961,6 +966,10 @@ async fn send_tx(
         })
         .collect();
     if !online {
+        let dropped = super::messages::drop_for_full_queues(&mut tx, &mut envs).await?;
+        if dropped > 0 {
+            tracing::debug!(group = %gid, dropped, "group send: skipped devices with a full queue");
+        }
         insert_envelopes(&mut tx, &envs).await?;
     }
     tx.commit().await?;

@@ -73,6 +73,7 @@ pub fn routes(st: &AppState) -> Router<AppState> {
         .route("/v1/admin/accounts/{id}/unban", post(unban))
         .route("/v1/admin/accounts/{id}/logout", post(logout))
         .route("/v1/admin/settings", get(get_settings).put(put_settings))
+        .route("/v1/admin/queue/purge", post(purge_queue))
         .route("/v1/admin/security", get(security))
         .route("/v1/admin/logs", get(logs))
         .route("/v1/admin/calls", get(calls))
@@ -692,6 +693,42 @@ async fn put_settings(State(st): State<AppState>, body: Body) -> ApiResult {
     let names: Vec<&str> = changes.iter().map(|(n, _)| *n).collect();
     info!(settings = ?names, "admin changed settings");
     Ok(reply(StatusCode::OK, st.settings.describe()))
+}
+
+/// Deletes undelivered messages (queued envelopes): all of them, or only those waiting for
+/// devices not seen for `inactive_days` days (devices that may never come back). Messages are
+/// end-to-end encrypted, so the server can only drop them; recipients never receive them.
+async fn purge_queue(State(st): State<AppState>, body: Body) -> ApiResult {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        /// "all" or "inactive".
+        scope: String,
+        #[serde(default)]
+        inactive_days: Option<i64>,
+    }
+    let req: Req = json_body(body).await?;
+    let deleted = match req.scope.as_str() {
+        // Runtime queries (not sqlx::query!): admin-only, no offline query data needed.
+        "all" => sqlx::query("DELETE FROM envelopes").execute(&st.db).await?.rows_affected(),
+        "inactive" => {
+            let days = req.inactive_days.unwrap_or(7);
+            if !(1..=365).contains(&days) {
+                return Err(bad_request("inactive_days must be in 1..365"));
+            }
+            let cutoff = crate::now_millis() - days * 86_400_000;
+            sqlx::query(
+                "DELETE e FROM envelopes e JOIN devices d ON d.account_id = e.account_id AND d.device_id = e.device_id
+                 WHERE d.last_seen_at < ?",
+            )
+            .bind(cutoff)
+            .execute(&st.db)
+            .await?
+            .rows_affected()
+        }
+        _ => return Err(bad_request("scope must be \"all\" or \"inactive\"")),
+    };
+    info!(scope = %req.scope, deleted, "admin purged queued messages");
+    Ok(reply(StatusCode::OK, json!({ "deleted": deleted })))
 }
 
 // --- security, logs, calls ----------------------------------------------------------------------

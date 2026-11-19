@@ -57,6 +57,14 @@ impl Inner {
         })
     }
 
+    /// Consumes `n` tokens for `key` under `rule` (fan-outs); 429 when exhausted.
+    pub fn rate_limit_n(&self, key: &str, rule: Rule, n: u32) -> Result<(), ApiError> {
+        self.limiter.allow_n(key, rule, n).map_err(|wait| {
+            crate::metrics::rate_limited(key);
+            rate_limited(wait)
+        })
+    }
+
     /// Client address, honouring the configured trusted proxy header (right-most entry of
     /// X-Forwarded-For, the one appended by our own proxy).
     pub fn client_ip(&self, headers: &HeaderMap, peer: SocketAddr) -> String {

@@ -203,6 +203,15 @@ pub fn apply(state: &mut GroupState, caller: &[u8], actions: &[Action], max_memb
     if actions.len() as i64 > 2 * max_members + 8 {
         return Err(bad_request("too many actions"));
     }
+    // The whole action list is stored in the change log: at most one attributes blob and one
+    // settings blob per change (only the last would matter anyway), so a change is bounded by
+    // ~128 KiB plus the member actions, not by the 2 MiB body.
+    let blobs = |f: fn(&Action) -> bool| actions.iter().filter(|a| f(a)).count();
+    if blobs(|a| matches!(a, Action::ModifyAttributes { .. })) > 1
+        || blobs(|a| matches!(a, Action::ModifySettings { .. })) > 1
+    {
+        return Err(bad_request("at most one modify_attributes and one modify_settings per change"));
+    }
     let caller_role = state.member(caller).map(|i| state.members[i].role);
     let caller_pending = state.pending_of(caller).is_some();
     let leaving = actions.iter().any(|a| matches!(a, Action::RemoveMember { uid } if uid == caller));
@@ -654,6 +663,8 @@ pub async fn modify(
     body: Body,
 ) -> ApiResult {
     let auth = group_auth(&st, &headers, peer)?;
+    // Every change is appended to the group's log: bound its growth per group.
+    st.rate_limit(&format!("groupsv2-modify:{}", hex::encode(&auth.id)), st.limits.group_modify)?;
     let req: ModifyRequest = parse_json(body, MAX_JSON_BODY).await?;
     let mut tx = st.db.begin().await?;
     let old = load_state(&mut tx, &auth, true).await?;
@@ -737,6 +748,8 @@ where
 
 /// POST /v2/groups/devices: the devices of the given accounts (the members a client decrypted).
 pub async fn devices(State(st): State<AppState>, p: Principal, body: Body) -> ApiResult {
+    // Up to max_group_members accounts per lookup, of any accounts: bound the enumeration.
+    st.rate_limit(&format!("groupsv2-devices:acct:{}", p.account), st.limits.group_devices_account)?;
     let req: DevicesRequest = parse_json(body, MAX_JSON_BODY).await?;
     let accounts = parse_accounts(&req.accounts, st.cfg.max_group_members)?;
     let devs = devices_of(&st.db, &accounts).await?;
@@ -798,6 +811,17 @@ pub async fn send(State(st): State<AppState>, p: Principal, body: Body) -> ApiRe
     if accounts.len() as i64 > st.cfg.max_group_members {
         return Err(bad_request("too many recipients"));
     }
+    // Until stage 4 the server cannot tell that the sender and the recipients share a group:
+    // any account could fan out to any 256 accounts. Budget the envelopes per sender.
+    st.rate_limit_n(
+        &format!("groupsv2-send:acct:{}", p.account),
+        st.limits.group_send_account,
+        given.len().min(u32::MAX as usize) as u32,
+    )?;
+    if !req.online {
+        let bytes = (req.content.len() as u64 * given.len() as u64).min(u32::MAX as u64) as u32;
+        super::messages::charge_sender(&st, &format!("acct:{}", p.account), bytes)?;
+    }
     let server_ts = crate::now_millis();
     let mut attempt = 0;
     let envs = loop {
@@ -816,7 +840,7 @@ pub async fn send(State(st): State<AppState>, p: Principal, body: Body) -> ApiRe
         if !stale.is_empty() {
             return Err(gone("stale registration ids").with("stale", refs_json(&stale)));
         }
-        let envs: Vec<Envelope> = given
+        let mut envs: Vec<Envelope> = given
             .keys()
             .map(|(account, device)| Envelope {
                 id: ids::new_uuid(),
@@ -832,6 +856,10 @@ pub async fn send(State(st): State<AppState>, p: Principal, body: Body) -> ApiRe
             })
             .collect();
         if !req.online {
+            let dropped = super::messages::drop_for_full_queues(&mut tx, &mut envs).await?;
+            if dropped > 0 {
+                tracing::debug!(dropped, "group v2 send: skipped devices with a full queue");
+            }
             match insert_envelopes(&mut tx, &envs).await {
                 // A device removed concurrently fails the foreign key: re-validate.
                 Err(e) if is_foreign_key_violation(&e) && attempt < 2 => {
@@ -966,6 +994,14 @@ mod tests {
             assert_eq!(e.status, StatusCode::FORBIDDEN, "{actions:?}");
         }
         // Members may edit attributes while the access allows it, and leave.
+        // One blob of each kind per change (the whole action list goes into the change log).
+        assert!(apply(
+            &mut s.clone(),
+            &bob_uid,
+            &[Action::ModifyAttributes { blob: vec![5] }, Action::ModifyAttributes { blob: vec![6] }],
+            256
+        )
+        .is_err());
         apply(&mut s, &bob_uid, &[Action::ModifyAttributes { blob: vec![7] }], 256).unwrap();
         assert_eq!(s.attributes, vec![7]);
         s.edit_access = Role::Admin;

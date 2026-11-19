@@ -223,6 +223,12 @@ pub async fn fetch_bundles(
     device: &str,
 ) -> ApiResult {
     let target = path_uuid("account_id", account_id)?;
+    // Every fetch consumes one-time keys of the target: bound how fast one account can drain
+    // another, and how fast everyone together can drain one account.
+    if let Some(p) = p {
+        st.rate_limit(&format!("keys:pair:{}:{}", p.account, target), st.limits.keys_pair)?;
+    }
+    st.rate_limit(&format!("keys:target:{target}"), st.limits.keys_target)?;
     let mut want_device = 0; // 0 = all devices
     if device != "*" {
         want_device = match device.parse::<i64>() {

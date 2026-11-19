@@ -48,7 +48,10 @@ pub enum Wake {
 }
 
 impl Wake {
-    /// At most one push per device and kind within this interval (calls: per call id).
+    /// At most one push per device and kind within this interval. Calls are coalesced
+    /// regardless of their id: a phone that was just made to ring (or woken, so it fetches the
+    /// queue) does not need a second VoIP push for every further offer, and otherwise anyone
+    /// could ring it continuously with fresh ids.
     fn interval(&self) -> Duration {
         match self {
             Wake::Message => MESSAGE_INTERVAL,
@@ -84,7 +87,7 @@ pub trait Notifier: Send + Sync {
 }
 
 const MESSAGE_INTERVAL: Duration = Duration::from_secs(10);
-const CALL_INTERVAL: Duration = Duration::from_secs(60);
+const CALL_INTERVAL: Duration = Duration::from_secs(30);
 const MESSAGE_ACK_GRACE: Duration = Duration::from_secs(10);
 const CALL_ACK_GRACE: Duration = Duration::from_secs(3);
 const WORKERS: usize = 4;
@@ -98,6 +101,15 @@ const BASE_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 type Key = (String, i64, Wake);
+
+/// The key under which pushes are coalesced: per device and kind, with the call id dropped
+/// (see `Wake::interval`).
+fn coalesce_key(key: &Key) -> Key {
+    match &key.2 {
+        Wake::Call { .. } => (key.0.clone(), key.1, Wake::Call { call_id: String::new() }),
+        Wake::Message => key.clone(),
+    }
+}
 
 struct Notifiers {
     fcm: Option<Arc<dyn Notifier>>,
@@ -167,6 +179,7 @@ impl Dispatcher {
 
     /// Records a push for `key` unless one was recorded less than its interval ago.
     fn admit(&self, key: &Key, now: Instant) -> bool {
+        let key = coalesce_key(key);
         let mut last = self.last.lock().unwrap();
         let (map, last_prune) = &mut *last;
         if last_prune.is_none_or(|t| now.duration_since(t) >= PRUNE_EVERY) {
@@ -174,12 +187,12 @@ impl Dispatcher {
             map.retain(|k, t| now.duration_since(*t) < k.2.interval());
         }
         if map
-            .get(key)
+            .get(&key)
             .is_some_and(|t| now.duration_since(*t) < key.2.interval())
         {
             return false; // coalesced with the previous push
         }
-        map.insert(key.clone(), now);
+        map.insert(key, now);
         true
     }
 
@@ -197,7 +210,7 @@ impl Dispatcher {
         if tx.try_send(key.clone()).is_err() {
             warn!(account, device, "push queue full, dropping push");
             // Not sent: the next event may try again.
-            self.last.lock().unwrap().0.remove(&key);
+            self.last.lock().unwrap().0.remove(&coalesce_key(&key));
         }
     }
 
@@ -210,13 +223,16 @@ impl Dispatcher {
             return;
         }
         let key = (account.to_string(), device, wake);
-        if !self.watching.lock().unwrap().insert(key.clone()) {
+        // One pending check per device and kind (calls: whatever their id), so distinct
+        // call ids cannot pile up sleeping tasks.
+        let watch = coalesce_key(&key);
+        if !self.watching.lock().unwrap().insert(watch.clone()) {
             return;
         }
         let (me, id) = (self.clone(), envelope_id.to_string());
         tokio::spawn(async move {
             tokio::time::sleep(key.2.ack_grace()).await;
-            me.watching.lock().unwrap().remove(&key);
+            me.watching.lock().unwrap().remove(&watch);
             let pending = sqlx::query!("SELECT 1 AS one FROM envelopes WHERE id = ?", &id)
                 .fetch_optional(&me.db)
                 .await;
@@ -487,10 +503,14 @@ mod tests {
         assert!(!d.admit(&msg(1), t0 + Duration::from_secs(9)));
         assert!(d.admit(&msg(2), t0 + Duration::from_secs(1)));
         assert!(d.admit(&msg(1), t0 + Duration::from_secs(11)));
-        // Calls are not held back by message pushes; the same call is pushed once.
+        // Calls are not held back by message pushes; one call push per device within the
+        // call interval, whatever the call id (a flood of fresh ids rings only once).
         assert!(d.admit(&call("c1"), t0));
-        assert!(!d.admit(&call("c1"), t0 + Duration::from_secs(30)));
-        assert!(d.admit(&call("c2"), t0 + Duration::from_secs(1)));
+        assert!(!d.admit(&call("c1"), t0 + Duration::from_secs(20)));
+        assert!(!d.admit(&call("c2"), t0 + Duration::from_secs(1)));
+        assert!(d.admit(&call("c2"), t0 + Duration::from_secs(31)));
+        // Another device of the account rings independently.
+        assert!(d.admit(&("acc".to_string(), 2, Wake::Call { call_id: "c1".into() }), t0));
         d.close(Duration::from_millis(10)).await;
     }
 

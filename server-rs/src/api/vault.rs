@@ -23,6 +23,12 @@ use crate::validate::{
 const MAX_VAULT_BODY: usize = 16 << 20;
 
 const DEFAULT_VAULT_LIMIT: i64 = 500;
+/// Charged to the quota for every record on top of its data, deleted (tombstone) records
+/// included: a row costs its id, index entries and a sequence number even with no data, so
+/// records cannot be created for free.
+pub const VAULT_RECORD_OVERHEAD: i64 = 128;
+/// Records (live or deleted) one account may hold.
+pub const MAX_VAULT_RECORDS_PER_ACCOUNT: i64 = 100_000;
 
 fn validate_vault_id(id: &str) -> Result<(), ApiError> {
     if id.is_empty()
@@ -77,7 +83,9 @@ pub async fn put_records(State(st): State<AppState>, p: Principal, body: Body) -
         }
         by_id.insert(rec.id, rec.data);
     }
-    let len_of = |id: &str| by_id[id].as_ref().map_or(0, |d| d.len() as i64);
+    let len_of = |id: &str| {
+        VAULT_RECORD_OVERHEAD + id.len() as i64 + by_id[id].as_ref().map_or(0, |d| d.len() as i64)
+    };
 
     let mut tx = st.db.begin().await?;
     let used = match sqlx::query!("SELECT vault_bytes FROM accounts WHERE id = ? FOR UPDATE", &p.account)
@@ -107,6 +115,16 @@ pub async fn put_records(State(st): State<AppState>, p: Principal, body: Body) -
         .sum();
     if delta > 0 && used + delta > st.cfg.vault_quota_bytes {
         return Err(too_large("vault quota exceeded"));
+    }
+    let new_ids = order.iter().filter(|id| !old_size.contains_key(*id)).count() as i64;
+    if new_ids > 0 {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM vault_records WHERE account_id = ?")
+            .bind(&p.account)
+            .fetch_one(&mut *tx)
+            .await?;
+        if count + new_ids > MAX_VAULT_RECORDS_PER_ACCOUNT {
+            return Err(too_large(format!("at most {MAX_VAULT_RECORDS_PER_ACCOUNT} vault records per account")));
+        }
     }
     // Reserve a block of sequence numbers from the global counter. The counter row lock is
     // held until commit, so sequence numbers become visible in order.
