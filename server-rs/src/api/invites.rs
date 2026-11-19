@@ -117,20 +117,42 @@ pub async fn put_invite(
         return Err(bad_request("blob is required and must not exceed 64 KiB"));
     }
     let mut m = begin_mutation(&st, &gid, &p, true).await?;
-    let res = sqlx::query!(
-        "INSERT INTO group_invites (group_id, token_hash, approval, preview, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE token_hash = VALUES(token_hash), approval = VALUES(approval), preview = VALUES(preview),
-             created_by = VALUES(created_by), created_at = VALUES(created_at)",
-        &gid,
-        token_hash(&req.token),
-        req.approval,
-        &req.blob,
-        &p.account,
-        crate::now_millis()
-    )
-    .execute(&mut *m.tx)
-    .await;
+    // Not INSERT ... ON DUPLICATE KEY UPDATE: the table has a second unique key (token_hash),
+    // and a token already used by another group would make that statement update the other
+    // group's row. The group row is locked (begin_mutation), so check-then-write is safe, and
+    // both statements below fail with a duplicate key error for a token in use elsewhere.
+    let hash = token_hash(&req.token);
+    let now = crate::now_millis();
+    // (The row's hash is selected because it decodes without a type override: the id columns
+    // are binary-collated and sqlx reports them as BINARY.)
+    let exists: Option<Vec<u8>> = sqlx::query_scalar("SELECT token_hash FROM group_invites WHERE group_id = ? FOR UPDATE")
+        .bind(&gid)
+        .fetch_optional(&mut *m.tx)
+        .await?;
+    let q = if exists.is_some() {
+        sqlx::query(
+            "UPDATE group_invites SET token_hash = ?, approval = ?, preview = ?, created_by = ?, created_at = ?
+             WHERE group_id = ?",
+        )
+        .bind(hash)
+        .bind(req.approval)
+        .bind(&req.blob)
+        .bind(&p.account)
+        .bind(now)
+        .bind(&gid)
+    } else {
+        sqlx::query(
+            "INSERT INTO group_invites (token_hash, approval, preview, created_by, created_at, group_id)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(hash)
+        .bind(req.approval)
+        .bind(&req.blob)
+        .bind(&p.account)
+        .bind(now)
+        .bind(&gid)
+    };
+    let res = q.execute(&mut *m.tx).await;
     match res {
         Err(e) if is_duplicate_key(&e) => return Err(conflict("token already in use")),
         Err(e) => return Err(e.into()),

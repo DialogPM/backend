@@ -78,7 +78,14 @@ pub async fn delete_device(
     if res.rows_affected() == 0 {
         return Err(not_found("unknown device"));
     }
+    // Logins already approved but not yet collected may have been approved by the device being
+    // removed: they are asked again (status 1 = approved, api/security.rs).
+    sqlx::query("DELETE FROM login_requests WHERE account_id = ? AND status = 1")
+        .bind(&p.account)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
+    st.prov.revoke(&p.account, Some(device_id));
     st.hub
         .close_device(&p.account, device_id, "device unlinked");
     st.hub

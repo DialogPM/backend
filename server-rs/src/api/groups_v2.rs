@@ -663,8 +663,6 @@ pub async fn modify(
     body: Body,
 ) -> ApiResult {
     let auth = group_auth(&st, &headers, peer)?;
-    // Every change is appended to the group's log: bound its growth per group.
-    st.rate_limit(&format!("groupsv2-modify:{}", hex::encode(&auth.id)), st.limits.group_modify)?;
     let req: ModifyRequest = parse_json(body, MAX_JSON_BODY).await?;
     let mut tx = st.db.begin().await?;
     let old = load_state(&mut tx, &auth, true).await?;
@@ -676,6 +674,11 @@ pub async fn modify(
     }
     let mut new = old.clone();
     let server_actions = apply(&mut new, &auth.uid, &req.actions, st.cfg.max_group_members)?;
+    // Every stored change is appended to the group's log: bound its growth per group. Charged
+    // only now, for a change that passed the membership, revision and permission checks, so
+    // that a removed member (who can still present for the group) or a member without rights
+    // cannot spend the budget with requests that are refused.
+    st.rate_limit(&format!("groupsv2-modify:{}", hex::encode(&auth.id)), st.limits.group_modify)?;
     let change = Change { revision: new.revision, source: auth.uid.clone(), actions: req.actions, server_actions };
     if new.members.is_empty() {
         // The last member left: the group is gone (with its log).
@@ -821,6 +824,16 @@ pub async fn send(State(st): State<AppState>, p: Principal, body: Body) -> ApiRe
     if !req.online {
         let bytes = (req.content.len() as u64 * given.len() as u64).min(u32::MAX as u64) as u32;
         super::messages::charge_sender(&st, &format!("acct:{}", p.account), bytes)?;
+    }
+    // The tag of a v2 send is chosen by the sender. It must not be the id of a v1 group, whose
+    // sends go through PUT /v1/groups/{id}/messages and its membership and only-admins checks:
+    // the envelopes would look the same to the recipients.
+    let v1_groups: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chat_groups WHERE id = ?")
+        .bind(&tag)
+        .fetch_one(&st.db)
+        .await?;
+    if v1_groups > 0 {
+        return Err(forbidden("group_id belongs to a group that uses /v1/groups/{id}/messages"));
     }
     let server_ts = crate::now_millis();
     let mut attempt = 0;

@@ -71,6 +71,11 @@ impl Session {
 
 struct LinkToken {
     account: String,
+    /// The device that approved the link and the hash of its bearer token at that time (device
+    /// ids are reused, so the id alone would not identify it). The link is only honoured while
+    /// that device still exists: a grant to add a device must not outlive its issuer.
+    approver_device: i64,
+    approver_token_hash: Vec<u8>,
     expires_at: i64,
 }
 
@@ -115,6 +120,17 @@ impl ProvisioningStore {
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Sessions> {
         self.inner.lock().unwrap()
+    }
+
+    /// Drops the pending device-linking grants of an account: every one (`device` None: account
+    /// recovery, where all devices are replaced) or those approved by one device (unlinked).
+    /// link_device checks the approving device again, so this only shortens the window.
+    pub fn revoke(&self, account: &str, device: Option<i64>) {
+        let mut ps = self.lock();
+        ps.tokens.retain(|_, t| t.account != account || device.is_some_and(|d| d != t.approver_device));
+        if device.is_none() {
+            ps.sessions.retain(|_, s| !(s.account == account && s.state == "approved"));
+        }
     }
 }
 
@@ -305,6 +321,14 @@ pub async fn approve(
     if req.payload.is_empty() || req.payload.len() > MAX_LINK_PAYLOAD {
         return Err(bad_request("payload must be 1-4096 bytes"));
     }
+    // The approving device as it is now: link_device requires it to be unchanged.
+    let approver_token_hash: Vec<u8> =
+        sqlx::query_scalar("SELECT token_hash FROM devices WHERE account_id = ? AND device_id = ?")
+            .bind(&p.account)
+            .bind(p.device)
+            .fetch_optional(&st.db)
+            .await?
+            .ok_or_else(|| unauthorized("missing or invalid token"))?;
     let mut ps = st.prov.lock();
     let token = random_b64(32);
     {
@@ -326,6 +350,8 @@ pub async fn approve(
         hex::encode(hash_key(&token)),
         LinkToken {
             account: p.account.clone(),
+            approver_device: p.device,
+            approver_token_hash,
             expires_at: crate::now_millis() + PROVISIONING_TTL_MS,
         },
     );
@@ -368,10 +394,11 @@ pub async fn link_device(
     let device = DeviceInfo::validate(req.device.as_ref())?;
     let key = hex::encode(hash_key(&req.link_token));
     let tok = st.prov.lock().tokens.remove(&key); // single use
-    let account = match tok {
-        Some(t) if crate::now_millis() <= t.expires_at && !req.link_token.is_empty() => t.account,
+    let tok = match tok {
+        Some(t) if crate::now_millis() <= t.expires_at && !req.link_token.is_empty() => t,
         _ => return Err(unauthorized("invalid or expired link token")),
     };
+    let account = tok.account.clone();
 
     // Retry only the transaction: the link token is already consumed (single use).
     let (row, device_id, token) = crate::db::retry_tx(|| async {
@@ -382,6 +409,19 @@ pub async fn link_device(
         let Some(row) = row else {
             return Err(unauthorized("account no longer exists"));
         };
+        // The device that approved this link was unlinked, or the account was recovered, in the
+        // meantime: its approval is void (checked under the account lock, so a removal cannot
+        // slip in between).
+        let approver: Option<Vec<u8>> =
+            sqlx::query_scalar("SELECT token_hash FROM devices WHERE account_id = ? AND device_id = ? AND token_hash = ?")
+                .bind(&account)
+                .bind(tok.approver_device)
+                .bind(&tok.approver_token_hash)
+                .fetch_optional(&mut *tx)
+                .await?;
+        if approver.is_none() {
+            return Err(unauthorized("invalid or expired link token"));
+        }
         let (device_id, token) = create_device(&st, &mut tx, &account, device).await?;
         tx.commit().await?;
         Ok((row, device_id, token))
@@ -403,4 +443,59 @@ pub async fn link_device(
             wrapped_account_key: row.wrapped_account_key,
         },
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn token(account: &str, device: i64) -> LinkToken {
+        LinkToken {
+            account: account.into(),
+            approver_device: device,
+            approver_token_hash: vec![device as u8; 32],
+            expires_at: crate::now_millis() + PROVISIONING_TTL_MS,
+        }
+    }
+
+    fn approved(account: &str) -> Session {
+        Session {
+            mode: "new".into(),
+            state: "approved".into(),
+            device_name: String::new(),
+            account: account.into(),
+            creator_key: Vec::new(),
+            new_key: None,
+            payload: None,
+            link_token: String::new(),
+            expires_at: crate::now_millis() + PROVISIONING_TTL_MS,
+        }
+    }
+
+    /// A link approved by a device does not outlive it: unlinking the device drops its links,
+    /// recovery drops every link of the account, and other accounts are never touched.
+    #[test]
+    fn revoke_drops_the_grants_of_removed_devices() {
+        let store = ProvisioningStore::default();
+        {
+            let mut ps = store.lock();
+            ps.tokens.insert("a1".into(), token("acct-a", 1));
+            ps.tokens.insert("a2".into(), token("acct-a", 2));
+            ps.tokens.insert("b1".into(), token("acct-b", 1));
+            ps.sessions.insert("sa".into(), approved("acct-a"));
+            ps.sessions.insert("sb".into(), approved("acct-b"));
+        }
+        store.revoke("acct-a", Some(2));
+        {
+            let ps = store.lock();
+            let mut left: Vec<_> = ps.tokens.keys().cloned().collect();
+            left.sort();
+            assert_eq!(left, ["a1", "b1"]);
+            assert_eq!(ps.sessions.len(), 2);
+        }
+        store.revoke("acct-a", None);
+        let ps = store.lock();
+        assert_eq!(ps.tokens.keys().collect::<Vec<_>>(), ["b1"]);
+        assert_eq!(ps.sessions.keys().collect::<Vec<_>>(), ["sb"]);
+    }
 }

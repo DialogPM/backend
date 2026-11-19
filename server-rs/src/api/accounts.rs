@@ -521,6 +521,8 @@ pub async fn recover(
     }
 
     let (device_id, token, old_devices) = crate::db::retry_tx(|| recover_tx(&st, &acct.id, &req, &kdf, device)).await?;
+    // Links approved by the devices that were just removed.
+    st.prov.revoke(&acct.id, None);
     info!(account = %acct.id, removed_devices = old_devices.len(), "account recovered");
     Ok(reply(
         StatusCode::OK,
