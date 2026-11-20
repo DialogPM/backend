@@ -41,16 +41,35 @@ pub async fn parse_json<T: DeserializeOwned>(body: Body, limit: usize) -> Result
     parse_json_bytes(&bytes)
 }
 
-/// Reads the whole body, failing with 413 above `limit` bytes.
+/// How long reading a request body of `len` bytes may take: a fixed allowance plus a slow
+/// mobile link's 32 KiB/s. The server only bounds the time to read the headers otherwise, so
+/// without it a client could hold a connection (and the buffer) by sending a body very slowly.
+/// Attachment uploads, which stream, have their own deadline (api/attachments.rs).
+pub fn body_read_timeout(len: u64) -> std::time::Duration {
+    std::time::Duration::from_secs(60 + len / (32 << 10))
+}
+
+/// Reads the whole body, failing with 413 above `limit` bytes and with 408 when it does not
+/// arrive within [`body_read_timeout`].
 pub async fn read_body(body: Body, limit: usize) -> Result<bytes::Bytes, ApiError> {
-    axum::body::to_bytes(body, limit).await.map_err(|e| {
-        let msg = e.to_string();
-        if msg.contains("length limit") {
-            too_large(format!("request body exceeds {limit} bytes"))
-        } else {
-            bad_request("could not read request body")
-        }
-    })
+    use axum::body::HttpBody;
+    let len = body.size_hint().exact().unwrap_or(limit as u64).min(limit as u64);
+    match tokio::time::timeout(body_read_timeout(len), axum::body::to_bytes(body, limit)).await {
+        Err(_) => Err(body_timeout()),
+        Ok(r) => r.map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("length limit") {
+                too_large(format!("request body exceeds {limit} bytes"))
+            } else {
+                bad_request("could not read request body")
+            }
+        }),
+    }
+}
+
+/// 408: the request body did not arrive in time.
+pub fn body_timeout() -> ApiError {
+    ApiError::new(axum::http::StatusCode::REQUEST_TIMEOUT, "request_timeout", "request body took too long to arrive")
 }
 
 pub fn parse_json_bytes<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, ApiError> {
@@ -371,5 +390,208 @@ mod tests {
         assert!(valid_phone("+40712345678"));
         assert!(!valid_phone("0712345678"));
         assert!(!valid_phone("+0712345678"));
+    }
+
+    #[test]
+    fn phone_bounds() {
+        assert!(valid_phone("+1234567"), "7 digits");
+        assert!(!valid_phone("+123456"), "6 digits");
+        assert!(valid_phone("+123456789012345"), "15 digits");
+        assert!(!valid_phone("+1234567890123456"), "16 digits");
+        assert!(!valid_phone("+12345a7"));
+        assert!(!valid_phone("+1234 567"));
+        assert!(!valid_phone("++1234567"));
+        assert!(!valid_phone(""));
+        assert!(!valid_phone("+"));
+    }
+
+    #[test]
+    fn device_names() {
+        assert!(validate_device_name("Ana's phone").is_ok());
+        assert!(validate_device_name(&"a".repeat(MAX_DEVICE_NAME_LEN)).is_ok());
+        // The limit counts characters, not bytes.
+        assert!(validate_device_name(&"ă".repeat(MAX_DEVICE_NAME_LEN)).is_ok());
+        assert!(validate_device_name(&"a".repeat(MAX_DEVICE_NAME_LEN + 1)).is_err());
+        assert!(validate_device_name("").is_err());
+        assert!(validate_device_name("   ").is_err());
+        assert!(validate_device_name("a\tb").is_err());
+        assert!(validate_device_name("a\u{7f}").is_err());
+        assert!(validate_device_name("a\nb").is_err());
+    }
+
+    #[test]
+    fn device_info() {
+        let dev = |platform: &str, registration_id: i64| DeviceInfo {
+            name: "laptop".into(),
+            platform: platform.into(),
+            registration_id,
+        };
+        assert!(DeviceInfo::validate(None).is_err());
+        for p in ["desktop", "android", "ios", "web", "cli"] {
+            assert!(DeviceInfo::validate(Some(&dev(p, 1))).is_ok(), "{p}");
+        }
+        for p in ["", "Desktop", "windows", "macos"] {
+            assert!(DeviceInfo::validate(Some(&dev(p, 1))).is_err(), "{p}");
+        }
+        assert!(DeviceInfo::validate(Some(&dev("ios", 0))).is_err());
+        assert!(DeviceInfo::validate(Some(&dev("ios", -1))).is_err());
+        assert!(DeviceInfo::validate(Some(&dev("ios", MAX_REGISTRATION_ID))).is_ok());
+        assert!(DeviceInfo::validate(Some(&dev("ios", MAX_REGISTRATION_ID + 1))).is_err());
+        let mut d = dev("ios", 1);
+        d.name = String::new();
+        assert!(DeviceInfo::validate(Some(&d)).is_err());
+    }
+
+    #[test]
+    fn byte_lengths() {
+        assert!(require_len("k", &[0; 32], 32).is_ok());
+        assert!(require_len("k", &[0; 31], 32).is_err());
+        assert!(require_len("k", &[0; 33], 32).is_err());
+        assert!(require_range("k", &[0; 1], 1, 4).is_ok());
+        assert!(require_range("k", &[0; 4], 1, 4).is_ok());
+        assert!(require_range("k", &[], 1, 4).is_err());
+        assert!(require_range("k", &[0; 5], 1, 4).is_err());
+        let e = require_len("signed_prekey.signature", &[], 64).unwrap_err();
+        assert!(e.message.contains("signed_prekey.signature"), "{}", e.message);
+        assert_eq!(hash_auth_key(&[1; AUTH_KEY_LEN]).len(), 32);
+        assert_ne!(hash_auth_key(&[1; AUTH_KEY_LEN]), hash_auth_key(&[2; AUTH_KEY_LEN]));
+    }
+
+    #[test]
+    fn path_and_reference_ids() {
+        assert_eq!(
+            path_uuid("account_id", "ABCDEF01-2345-6789-ABCD-EF0123456789").unwrap(),
+            "abcdef01-2345-6789-abcd-ef0123456789"
+        );
+        let e = path_uuid("account_id", "me").unwrap_err();
+        assert_eq!(e.status, axum::http::StatusCode::BAD_REQUEST);
+        assert!(e.message.contains("account_id"));
+        assert!(optional_attachment_id("avatar", None).is_ok());
+        assert!(optional_attachment_id("avatar", Some("0123456789abcdef0123456789abcdef")).is_ok());
+        assert!(optional_attachment_id("avatar", Some("")).is_err());
+        assert!(optional_attachment_id("avatar", Some("0123")).is_err());
+    }
+
+    fn kdf(json: &str) -> Result<String, ApiError> {
+        let raw = serde_json::value::RawValue::from_string(json.into()).unwrap();
+        parse_kdf(Some(&raw))
+    }
+
+    #[test]
+    fn kdf_rules() {
+        let with = |alg: &str, salt: &str, m: i64, t: i64, p: i64| {
+            kdf(&format!(r#"{{"alg":"{alg}","salt":"{salt}","m":{m},"t":{t},"p":{p}}}"#))
+        };
+        let salt = "AAAAAAAAAAAAAAAAAAAAAA==";
+        assert!(with("argon2id", salt, 8, 1, 1).is_ok());
+        assert!(with("argon2id", salt, 4 << 20, 100, 255).is_ok());
+        assert!(with("argon2i", salt, 65536, 3, 1).is_err());
+        assert!(with("pbkdf2", salt, 65536, 3, 1).is_err());
+        assert!(with("argon2id", "AAAA", 65536, 3, 1).is_err(), "short salt");
+        assert!(with("argon2id", salt, 7, 3, 1).is_err());
+        assert!(with("argon2id", salt, (4 << 20) + 1, 3, 1).is_err());
+        assert!(with("argon2id", salt, 65536, 0, 1).is_err());
+        assert!(with("argon2id", salt, 65536, 101, 1).is_err());
+        assert!(with("argon2id", salt, 65536, 3, 0).is_err());
+        assert!(with("argon2id", salt, 65536, 3, 256).is_err());
+        assert!(parse_kdf(None).is_err());
+        assert!(kdf("null").is_err());
+        assert!(kdf(r#""argon2id""#).is_err());
+        assert!(kdf("{}").is_err());
+    }
+
+    #[test]
+    fn fake_kdf_is_stable_and_plausible() {
+        let a = fake_kdf("secret", "1234567890123456");
+        // Asking twice for the same unknown number must not reveal that it is unknown.
+        assert_eq!(a, fake_kdf("secret", "1234567890123456"));
+        assert_ne!(a, fake_kdf("secret", "1234567890123457"));
+        assert_ne!(a, fake_kdf("other secret", "1234567890123456"));
+        // It passes the same validation as a real one, with the default cost.
+        assert_eq!(kdf(&a).unwrap(), a);
+        let k: KdfParams = serde_json::from_str(&a).unwrap();
+        assert_eq!((k.salt.len(), k.m, k.t, k.p), (KDF_SALT_LEN, DEFAULT_KDF_M, DEFAULT_KDF_T, DEFAULT_KDF_P));
+    }
+
+    #[test]
+    fn json_bodies() {
+        #[derive(Deserialize, Debug)]
+        struct R {
+            #[serde(default)]
+            n: i64,
+        }
+        assert_eq!(parse_json_bytes::<R>(br#" {"n": 4} "#).unwrap().n, 4);
+        assert_eq!(parse_json_bytes::<R>(br#"{"n": 4, "unknown": [1, {"x": null}]}"#).unwrap().n, 4);
+        assert_eq!(parse_json_bytes::<R>(b"{}").unwrap().n, 0);
+        for bad in [&b""[..], b"  \n", b"{", br#"{"n": 4} x"#, br#"{"n": 4}{"n": 5}"#, br#"{"n": "four"}"#] {
+            let e = parse_json_bytes::<R>(bad).unwrap_err();
+            assert_eq!(e.status, axum::http::StatusCode::BAD_REQUEST, "{:?}", String::from_utf8_lossy(bad));
+        }
+    }
+
+    #[tokio::test]
+    async fn body_size_limit() {
+        #[derive(Deserialize, Debug)]
+        struct R {
+            #[serde(default)]
+            n: i64,
+        }
+        let r: R = parse_json(Body::from(r#"{"n":1}"#), 7).await.unwrap();
+        assert_eq!(r.n, 1);
+        let e = parse_json::<R>(Body::from(r#"{"n":12}"#), 7).await.unwrap_err();
+        assert_eq!(e.status, axum::http::StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(read_body(Body::from(vec![0u8; 16]), 16).await.unwrap().len(), 16);
+        assert_eq!(
+            read_body(Body::from(vec![0u8; 17]), 16).await.unwrap_err().status,
+            axum::http::StatusCode::PAYLOAD_TOO_LARGE
+        );
+    }
+
+    #[test]
+    fn base64_fields() {
+        assert_eq!(b64::encode(&[0xfb, 0xff]), "+/8=");
+        assert_eq!(b64::decode("+/8=").unwrap(), vec![0xfb, 0xff]);
+        assert_eq!(b64::decode("AQ\r\nID").unwrap(), vec![1, 2, 3], "line breaks are ignored");
+        assert_eq!(b64::decode("").unwrap(), Vec::<u8>::new());
+        assert!(b64::decode("-_8=").is_none(), "URL alphabet");
+        assert!(b64::decode("A").is_none());
+        assert!(b64::decode("AQ ID").is_none());
+
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct S {
+            #[serde(with = "b64")]
+            a: Vec<u8>,
+            #[serde(with = "b64::opt", default)]
+            b: Option<Vec<u8>>,
+            #[serde(with = "b64::list", default)]
+            c: Vec<Vec<u8>>,
+        }
+        let s = S { a: vec![1], b: Some(vec![2, 3]), c: vec![vec![4], vec![]] };
+        let json = serde_json::to_string(&s).unwrap();
+        assert_eq!(json, r#"{"a":"AQ==","b":"AgM=","c":["BA==",""]}"#);
+        assert_eq!(serde_json::from_str::<S>(&json).unwrap(), s);
+        // null: an empty vector, None and an empty list.
+        let n: S = serde_json::from_str(r#"{"a":null,"b":null,"c":null}"#).unwrap();
+        assert_eq!(n, S { a: vec![], b: None, c: vec![] });
+        assert!(serde_json::from_str::<S>(r#"{"a":"*"}"#).is_err());
+        assert!(serde_json::from_str::<S>(r#"{"a":"","b":"*"}"#).is_err());
+        assert!(serde_json::from_str::<S>(r#"{"a":"","c":["AQ==","*"]}"#).is_err());
+    }
+
+    #[test]
+    fn go_compat_normalizes_nested_values() {
+        let v = go_compat(serde_json::json!({
+            "Name": "x", "gone": null,
+            "List": [{"Inner": 1, "drop": null}, null, "KeepCase"],
+            "obj": {"UPPER": {"Deep": true}}
+        }));
+        assert_eq!(
+            v,
+            serde_json::json!({
+                "name": "x",
+                "list": [{"inner": 1}, null, "KeepCase"],
+                "obj": {"upper": {"deep": true}}
+            })
+        );
     }
 }

@@ -63,6 +63,9 @@ pub struct Config {
 
     /// e.g. "X-Forwarded-For" or "X-Real-IP"; empty = use the peer address.
     pub trusted_proxy_header: String,
+    /// HTTP connections served at once (upgraded WebSockets not included); further
+    /// connections wait in the listen backlog until one closes.
+    pub max_connections: i64,
     pub log_level: String,
     /// "text" or "json".
     pub log_format: String,
@@ -115,6 +118,7 @@ impl Default for Config {
             turn_credential_ttl: Duration::from_secs(3600),
             stun_urls: Vec::new(),
             trusted_proxy_header: String::new(),
+            max_connections: 10_000,
             log_level: "info".into(),
             log_format: "text".into(),
             admin_public_keys: Vec::new(),
@@ -243,6 +247,7 @@ impl Config {
         string!("CHATAPP_APNS_TOPIC", c.apns_topic);
         boolean!("CHATAPP_APNS_SANDBOX", c.apns_sandbox);
         string!("CHATAPP_TRUSTED_PROXY_HEADER", c.trusted_proxy_header);
+        integer!("CHATAPP_MAX_CONNECTIONS", c.max_connections, 16, 1_000_000);
         if let Some(v) = lookup("CHATAPP_TURN_URLS") {
             c.turn_urls = split_list(&v);
         }

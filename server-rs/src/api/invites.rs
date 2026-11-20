@@ -405,3 +405,22 @@ pub async fn delete_join_request(
     );
     Ok(no_content())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invite_tokens() {
+        assert!(validate_token(&[9; INVITE_TOKEN_LEN]).is_ok());
+        assert!(validate_token(&[9; INVITE_TOKEN_LEN - 1]).is_err());
+        assert!(validate_token(&[9; INVITE_TOKEN_LEN + 1]).is_err());
+        assert!(validate_token(&[]).is_err());
+        // Only the hash is stored: stable, 32 bytes, different per token.
+        let h = token_hash(&[9; INVITE_TOKEN_LEN]);
+        assert_eq!(h.len(), 32);
+        assert_eq!(h, token_hash(&[9; INVITE_TOKEN_LEN]));
+        assert_ne!(h, token_hash(&[8; INVITE_TOKEN_LEN]));
+        assert_ne!(h, vec![9; INVITE_TOKEN_LEN]);
+    }
+}

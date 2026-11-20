@@ -239,10 +239,10 @@ pub async fn send_messages(
         given.insert(m.device_id, m);
     }
 
-    if !req.online {
-        let bytes = given.values().fold(0u32, |n, m| n.saturating_add(m.content.len() as u32));
-        charge_sender(st, sender, bytes)?;
-    }
+    // Online (not stored) sends are charged too: they are not stored, but every byte is still
+    // written to the recipients' sockets.
+    let bytes = given.values().fold(0u32, |n, m| n.saturating_add(m.content.len() as u32));
+    charge_sender(st, sender, bytes)?;
 
     let server_ts = crate::now_millis();
     let mut tx = st.db.begin().await?;
@@ -504,4 +504,74 @@ pub async fn websocket(
     let hub = st.hub.clone();
     ws.max_message_size(256 << 10)
         .on_upgrade(move |socket| hub.serve(socket, p.account, p.device, privacy == "nobody", active))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn envelope(content: Vec<u8>) -> Envelope {
+        Envelope {
+            id: "e1".into(),
+            kind: ENVELOPE_WHISPER,
+            source_account: "src".into(),
+            source_device: 1,
+            destination_device: 2,
+            group_id: None,
+            timestamp: 10,
+            server_timestamp: 20,
+            content,
+            dest_account: "dest".into(),
+        }
+    }
+
+    #[test]
+    fn envelope_types() {
+        for t in [ENVELOPE_WHISPER, ENVELOPE_PREKEY, ENVELOPE_SENDER_KEY, ENVELOPE_PLAINTEXT] {
+            assert!(valid_envelope_type(t), "{t}");
+        }
+        // Sealed envelopes only come in through the sealed-sender endpoint.
+        for t in [ENVELOPE_SEALED, -1, 0, 1, 4, 5, 9, i64::MAX] {
+            assert!(!valid_envelope_type(t), "{t}");
+        }
+    }
+
+    #[test]
+    fn content_limits() {
+        assert_eq!(validate_content(&[]).unwrap_err().status, StatusCode::BAD_REQUEST);
+        assert!(validate_content(&[0]).is_ok());
+        assert!(validate_content(&vec![0; MAX_MESSAGE_CONTENT]).is_ok());
+        assert_eq!(
+            validate_content(&vec![0; MAX_MESSAGE_CONTENT + 1]).unwrap_err().status,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+    }
+
+    #[test]
+    fn timestamps_must_be_positive() {
+        assert!(validate_timestamp(1).is_ok());
+        assert!(validate_timestamp(0).is_err());
+        assert!(validate_timestamp(-5).is_err());
+    }
+
+    #[test]
+    fn content_bytes_adds_up() {
+        assert_eq!(content_bytes(&[]), 0);
+        assert_eq!(content_bytes(&[envelope(vec![0; 3]), envelope(vec![0; 40])]), 43);
+    }
+
+    #[test]
+    fn envelope_wire_format() {
+        let v: serde_json::Value = serde_json::from_str(&envelope(vec![1, 2, 3]).to_json()).unwrap();
+        assert_eq!(
+            v,
+            json!({
+                "id": "e1", "type": 2, "source_account": "src", "source_device": 1,
+                "destination_device": 2, "group_id": null, "timestamp": 10,
+                "server_timestamp": 20, "content": "AQID"
+            })
+        );
+        // The destination account stays on the server.
+        assert!(v.get("dest_account").is_none());
+    }
 }

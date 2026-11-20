@@ -94,7 +94,8 @@ pub async fn entries(
     // client's one-time download of the log (self-monitoring).
     st.rate_limit(&format!("kt-entries:ip:{}", st.client_ip(&headers, peer)), st.limits.kt_entries_ip)?;
     let start = query_int(q.as_deref(), "start", 0, 0, i64::MAX)?;
-    let end = query_int(q.as_deref(), "end", start + MAX_ENTRIES, 0, i64::MAX)?;
+    // Saturating: start may be up to i64::MAX.
+    let end = query_int(q.as_deref(), "end", start.saturating_add(MAX_ENTRIES), 0, i64::MAX)?;
     if end < start || end - start > MAX_ENTRIES {
         return Err(bad_request(format!("at most {MAX_ENTRIES} entries per request")));
     }

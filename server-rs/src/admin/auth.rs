@@ -120,8 +120,16 @@ impl Verifier {
         }
     }
 
-    /// Checks one request; on success returns the fingerprint of the key that signed it.
-    pub fn verify(&self, method: &str, path_with_query: &str, h: &SignedHeaders, body: &[u8], now_ms: i64) -> Result<String, Reject> {
+    /// The checks that need no body and no signature verification: well-formed headers, a
+    /// configured key, a fresh timestamp. Run before the body is read, so that a request without
+    /// a configured key costs neither the body read nor an Ed25519 verification.
+    pub fn precheck(&self, h: &SignedHeaders, now_ms: i64) -> Result<(), Reject> {
+        self.check_headers(h, now_ms).map(|_| ())
+    }
+
+    /// Key index, public key and signature of well-formed headers with a configured key and a
+    /// fresh timestamp.
+    fn check_headers(&self, h: &SignedHeaders, now_ms: i64) -> Result<(usize, [u8; 32], [u8; 64]), Reject> {
         let pk: [u8; 32] = STANDARD
             .decode(h.key.trim())
             .ok()
@@ -150,6 +158,12 @@ impl Verifier {
         if (now_ms - ts).abs() > MAX_SKEW_MS {
             return Err(Reject::StaleTimestamp);
         }
+        Ok((idx, pk, sig))
+    }
+
+    /// Checks one request; on success returns the fingerprint of the key that signed it.
+    pub fn verify(&self, method: &str, path_with_query: &str, h: &SignedHeaders, body: &[u8], now_ms: i64) -> Result<String, Reject> {
+        let (idx, pk, sig) = self.check_headers(h, now_ms)?;
         let msg = signing_string(method, path_with_query, h.timestamp, h.nonce, body);
         self.keys[idx]
             .1
@@ -261,6 +275,26 @@ mod tests {
 
     const EXAMPLE_SIG_GET: &str = "Lv+e12xoXB4MjXPbKaOBr/E00DxX1wtfNT5IjT/imxwzYfbeOCLrmJ3wAb1a8WPqGW85ALlOMERdy1wjFvXvBA==";
     const EXAMPLE_SIG_POST: &str = "jvGyG9VLxrl9DqRfX5DsCdJb65YP73+z9YH2T/56l+uui8P46e/Umvb/YeHTPe16Zm8UjWtQK6fjEFCpjZkxBg==";
+
+    #[test]
+    fn precheck_needs_no_body_or_signature() {
+        let sk = example_key();
+        let other = SigningKey::from_bytes(&[9u8; 32]);
+        let v = Verifier::new(&[sk.verifying_key().to_bytes()]);
+        let h = |r: &Req| v.precheck(&SignedHeaders { key: &r.key, timestamp: &r.ts, nonce: &r.nonce, signature: &r.sig }, NOW);
+        // Passes on the headers alone; the signature is checked later, with the body.
+        let mut r = signed(&sk, "POST", "/v1/admin/settings", NOW, "aaaaaaaaaaaaaaaa", b"{}");
+        assert_eq!(h(&r), Ok(()));
+        r.sig = signed(&other, "POST", "/v1/admin/settings", NOW, "aaaaaaaaaaaaaaaa", b"{}").sig;
+        assert_eq!(h(&r), Ok(()));
+        assert_eq!(check(&v, &r, NOW), Err(Reject::BadSignature));
+        // Refused before any of that: unknown key, stale timestamp, malformed headers.
+        assert_eq!(h(&signed(&other, "GET", "/v1/admin/overview", NOW, "bbbbbbbbbbbbbbbb", b"")), Err(Reject::UnknownKey));
+        assert_eq!(h(&signed(&sk, "GET", "/v1/admin/overview", NOW - 3_600_000, "cccccccccccccccc", b"")), Err(Reject::StaleTimestamp));
+        let mut r = signed(&sk, "GET", "/v1/admin/overview", NOW, "dddddddddddddddd", b"");
+        r.nonce = "short".into();
+        assert_eq!(h(&r), Err(Reject::BadHeaders));
+    }
 
     #[test]
     fn accepts_valid_and_rejects_wrong_key() {

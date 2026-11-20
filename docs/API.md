@@ -39,9 +39,21 @@ Conventions
   "phone_verification_enabled": true,
   "max_attachment_bytes": 104857600,
   "max_devices": 6,
-  "kt_public_key": "base64 (32-byte Ed25519 key)"
+  "kt_public_key": "base64 (32-byte Ed25519 key)",
+  "client_versions": {
+    "desktop": {"latest": "0.1.2", "min": "0.1.0"},
+    "android": {"latest": "1.0.1"},
+    "ios": {"latest": "1.0.1"}
+  }
 }
 ```
+
+`client_versions` (server-rs) is what the operator announces in the admin settings, per platform
+(`desktop`, `android`, `ios`), as plain `major.minor.patch` versions; the object, a platform or
+a key is absent when nothing is set. An app older than `latest` offers the update at start (the
+user may postpone it), one older than `min` requires it. The server only announces numbers: the
+apps open their own built-in store or download link and ignore anything that is not a plain
+version.
 
 `kt_public_key` (server-rs) signs the key transparency tree heads (§19); clients pin it on first
 contact and refuse a change.

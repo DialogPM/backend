@@ -135,4 +135,57 @@ mod tests {
             "otpauth://totp/My%20Chat%20%28EU%29%2A:1234?algorithm=SHA1&digits=6&issuer=My+Chat+%28EU%29%2A&period=30&secret=MZXW6YTBOI"
         );
     }
+
+    #[test]
+    fn more_rfc6238_vectors() {
+        let secret = b"12345678901234567890";
+        assert_eq!(code(secret, step(1111111111)), "050471");
+        assert_eq!(code(secret, step(1234567890)), "005924");
+        assert_eq!(code(secret, step(2000000000)), "279037");
+        assert_eq!(code(secret, step(20000000000)), "353130");
+    }
+
+    #[test]
+    fn steps() {
+        assert_eq!(step(0), 0);
+        assert_eq!(step(29), 0);
+        assert_eq!(step(30), 1);
+        assert_eq!(step(-1), -1);
+        assert_eq!(new_secret().len(), 20);
+        assert_ne!(new_secret(), new_secret());
+    }
+
+    #[test]
+    fn verify_window_and_replay() {
+        let secret = b"12345678901234567890";
+        let now = 1_700_000_000;
+        let s = step(now);
+        // One step of clock drift either way is accepted, two are not.
+        assert_eq!(verify(secret, &code(secret, s - 1), now, 0), Some(s - 1));
+        assert_eq!(verify(secret, &code(secret, s + 1), now, 0), Some(s + 1));
+        assert_eq!(verify(secret, &code(secret, s - 2), now, 0), None);
+        assert_eq!(verify(secret, &code(secret, s + 2), now, 0), None);
+        // A used step, and every step before it, is refused.
+        assert_eq!(verify(secret, &code(secret, s - 1), now, s), None);
+        assert_eq!(verify(secret, &code(secret, s + 1), now, s), Some(s + 1));
+        // Codes typed with spaces are accepted; anything that is not six characters is not.
+        let c = code(secret, s);
+        assert_eq!(verify(secret, &format!(" {} {} ", &c[..3], &c[3..]), now, 0), Some(s));
+        assert_eq!(verify(secret, &c[..5], now, 0), None);
+        assert_eq!(verify(secret, &format!("{c}0"), now, 0), None);
+        assert_eq!(verify(secret, "", now, 0), None);
+        // Another secret's code does not pass.
+        assert_eq!(verify(b"another secret 12345", &c, now, 0), None);
+    }
+
+    #[test]
+    fn base32() {
+        assert_eq!(encode(b""), "");
+        assert_eq!(encode(b"f"), "MY");
+        assert_eq!(encode(b"fo"), "MZXQ");
+        assert_eq!(encode(b"foo"), "MZXW6");
+        assert_eq!(encode(b"foob"), "MZXW6YQ");
+        assert_eq!(encode(b"fooba"), "MZXW6YTB");
+        assert_eq!(encode(&[0xff; 20]).len(), 32);
+    }
 }

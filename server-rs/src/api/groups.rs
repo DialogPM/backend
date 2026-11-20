@@ -872,10 +872,16 @@ pub async fn group_send(
         given.insert(key, rc.registration_id);
     }
 
-    if !req.online {
-        let bytes = (req.content.len() as u64 * given.len() as u64).min(u32::MAX as u64) as u32;
-        super::messages::charge_sender(&st, &format!("acct:{}", p.account), bytes)?;
-    }
+    // An account may create a group with any accounts as members: the fan-out shares the
+    // per-sender envelope budget of v2 group sends. Online sends are charged like stored ones
+    // (they still reach every recipient's socket).
+    st.rate_limit_n(
+        &super::groups_v2::group_send_key(&p.account),
+        st.limits.group_send_account,
+        given.len().min(u32::MAX as usize) as u32,
+    )?;
+    let bytes = (req.content.len() as u64 * given.len() as u64).min(u32::MAX as u64) as u32;
+    super::messages::charge_sender(&st, &format!("acct:{}", p.account), bytes)?;
 
     let server_ts = crate::now_millis();
     let mut attempt = 0;
@@ -974,4 +980,38 @@ async fn send_tx(
     }
     tx.commit().await?;
     Ok(envs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn account_id_lists_are_normalized_and_deduplicated() {
+        let a = "ABCDEF01-2345-6789-abcd-ef0123456789".to_string();
+        let b = "11111111-2222-3333-4444-555555555555".to_string();
+        let out = parse_account_ids("members", &[a.clone(), b.clone(), a.to_lowercase()], 10).unwrap();
+        assert_eq!(out, vec![a.to_lowercase(), b.clone()]);
+        assert!(parse_account_ids("members", &[], 10).unwrap().is_empty());
+        // The limit applies before de-duplication.
+        assert_eq!(
+            parse_account_ids("members", &[a.clone(), a.clone()], 1).unwrap_err().status,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            parse_account_ids("members", &[b, "not-a-uuid".into()], 10).unwrap_err().status,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[test]
+    fn metadata_limits() {
+        assert_eq!(validate_metadata(&[]).unwrap_err().status, StatusCode::BAD_REQUEST);
+        assert!(validate_metadata(&[1]).is_ok());
+        assert!(validate_metadata(&vec![0; crate::validate::MAX_GROUP_METADATA]).is_ok());
+        assert_eq!(
+            validate_metadata(&vec![0; crate::validate::MAX_GROUP_METADATA + 1]).unwrap_err().status,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+    }
 }

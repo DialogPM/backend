@@ -15,6 +15,7 @@ use tracing::info;
 
 use super::{no_content, reply};
 use crate::auth::Principal;
+use crate::db::RowExt;
 use crate::error::{bad_request, conflict, internal_from, ApiError, ApiResult};
 use crate::state::AppState;
 use crate::totp;
@@ -160,22 +161,30 @@ struct CodeRequest {
 pub async fn enable(State(st): State<AppState>, p: Principal, body: Body) -> ApiResult {
     let req: CodeRequest = parse_json(body, MAX_JSON_BODY).await?;
     totp_rate_limit(&st, &p.account)?;
-    let row = sqlx::query!("SELECT totp_pending, totp_secret FROM accounts WHERE id = ?", &p.account)
-        .fetch_one(&st.db)
+    // Row locked from the read to the update: a concurrent setup cannot replace the pending
+    // secret in between, and the secret enabled is the one the code was checked against.
+    let mut tx = st.db.begin().await?;
+    let row = sqlx::query("SELECT totp_pending, totp_secret FROM accounts WHERE id = ? FOR UPDATE")
+        .bind(&p.account)
+        .fetch_one(&mut *tx)
         .await?;
-    if row.totp_secret.is_some() {
+    if row.opt_bytes("totp_secret").is_some() {
         return Err(conflict("two-step verification is already enabled"));
     }
-    let Some(pending) = row.totp_pending else {
+    let Some(pending) = row.opt_bytes("totp_pending") else {
         return Err(bad_request("start the setup first"));
     };
     let secret = open_totp(&st, &p.account, &pending)?;
     let Some(step) = totp::verify(&secret, &req.code, now_secs(), 0) else {
         return Err(invalid_totp());
     };
-    sqlx::query!("UPDATE accounts SET totp_secret = totp_pending, totp_pending = NULL, totp_last_step = ? WHERE id = ?", step, &p.account)
-        .execute(&st.db)
+    sqlx::query("UPDATE accounts SET totp_secret = ?, totp_pending = NULL, totp_last_step = ? WHERE id = ?")
+        .bind(&pending)
+        .bind(step)
+        .bind(&p.account)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     info!(account = %p.account, "two-step verification enabled");
     Ok(no_content())
 }

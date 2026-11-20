@@ -263,9 +263,15 @@ pub async fn get_session(
 
 pub async fn poll(
     State(st): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     RawQuery(q): RawQuery,
 ) -> ApiResult {
+    st.rate_limit(
+        &format!("provision-poll:ip:{}", st.client_ip(&headers, peer)),
+        st.limits.provision_poll_ip,
+    )?;
     let key = q
         .and_then(|q| {
             url::form_urlencoded::parse(q.as_bytes())

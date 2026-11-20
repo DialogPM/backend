@@ -36,6 +36,8 @@ pub struct Inner {
     pub settings: crate::settings::Runtime,
     /// Admin API (None: disabled).
     pub admin: Option<crate::admin::Admin>,
+    /// Attachment uploads in progress per account.
+    pub uploads: crate::api::attachments::UploadSlots,
 }
 
 #[derive(Clone)]
@@ -68,16 +70,57 @@ impl Inner {
     /// Client address, honouring the configured trusted proxy header (right-most entry of
     /// X-Forwarded-For, the one appended by our own proxy).
     pub fn client_ip(&self, headers: &HeaderMap, peer: SocketAddr) -> String {
-        let hdr = &self.cfg.trusted_proxy_header;
-        if !hdr.is_empty() {
-            if let Some(v) = headers.get(hdr.as_str()).and_then(|v| v.to_str().ok()) {
-                if let Some(last) = v.split(',').next_back() {
-                    if let Ok(ip) = last.trim().parse::<std::net::IpAddr>() {
-                        return ip.to_canonical().to_string();
-                    }
+        client_ip(&self.cfg.trusted_proxy_header, headers, peer)
+    }
+}
+
+/// See [`Inner::client_ip`]. The header may come in several lines (a proxy may append its own
+/// line after one the client sent): the last line is the proxy's, and within it the right-most
+/// entry.
+fn client_ip(trusted_header: &str, headers: &HeaderMap, peer: SocketAddr) -> String {
+    if !trusted_header.is_empty() {
+        if let Some(v) = headers.get_all(trusted_header).iter().next_back().and_then(|v| v.to_str().ok()) {
+            if let Some(last) = v.split(',').next_back() {
+                if let Ok(ip) = last.trim().parse::<std::net::IpAddr>() {
+                    return ip.to_canonical().to_string();
                 }
             }
         }
-        peer.ip().to_canonical().to_string()
+    }
+    peer.ip().to_canonical().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    #[test]
+    fn client_ip_uses_the_proxys_entry() {
+        let peer: SocketAddr = "10.0.0.2:5000".parse().unwrap();
+        let mut h = HeaderMap::new();
+        // No trusted header configured: the peer, whatever the client sends.
+        h.append("x-forwarded-for", HeaderValue::from_static("1.2.3.4"));
+        assert_eq!(client_ip("", &h, peer), "10.0.0.2");
+        // One line: its right-most entry (the one our proxy appended).
+        let mut h = HeaderMap::new();
+        h.append("x-forwarded-for", HeaderValue::from_static("1.2.3.4, 203.0.113.7"));
+        assert_eq!(client_ip("X-Forwarded-For", &h, peer), "203.0.113.7");
+        // The client's own line first, the proxy's line after it: the proxy's counts.
+        let mut h = HeaderMap::new();
+        h.append("x-forwarded-for", HeaderValue::from_static("1.2.3.4"));
+        h.append("x-forwarded-for", HeaderValue::from_static("198.51.100.9"));
+        assert_eq!(client_ip("X-Forwarded-For", &h, peer), "198.51.100.9");
+        let mut h = HeaderMap::new();
+        h.append("x-forwarded-for", HeaderValue::from_static("1.2.3.4"));
+        h.append("x-forwarded-for", HeaderValue::from_static("5.6.7.8, 198.51.100.9"));
+        assert_eq!(client_ip("X-Forwarded-For", &h, peer), "198.51.100.9");
+        // IPv4-mapped IPv6 is shown as IPv4; garbage falls back to the peer.
+        let mut h = HeaderMap::new();
+        h.append("x-real-ip", HeaderValue::from_static("::ffff:192.0.2.1"));
+        assert_eq!(client_ip("X-Real-IP", &h, peer), "192.0.2.1");
+        let mut h = HeaderMap::new();
+        h.append("x-real-ip", HeaderValue::from_static("not an address"));
+        assert_eq!(client_ip("X-Real-IP", &h, peer), "10.0.0.2");
     }
 }

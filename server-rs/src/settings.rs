@@ -27,6 +27,68 @@ pub struct Settings {
     pub pow_adaptive_threshold: i64,
     /// Ceiling of the adaptive difficulty (bits).
     pub pow_adaptive_max_bits: i64,
+    /// Client versions announced in `/v1/info` (`client_versions`), in the order of
+    /// [`VERSION_NAMES`], packed by [`parse_version`]; 0 = not announced. An app older than
+    /// "latest" offers the update, one older than "min" requires it.
+    pub client_versions: [i64; 6],
+}
+
+/// Version settings (strings "major.minor.patch", "" = not announced), per platform.
+pub const VERSION_NAMES: [&str; 6] = [
+    "client_latest_desktop",
+    "client_min_desktop",
+    "client_latest_android",
+    "client_min_android",
+    "client_latest_ios",
+    "client_min_ios",
+];
+
+/// "1.2.3" as a comparable number (each part 0..=9999); "" is 0. None when malformed.
+pub fn parse_version(v: &str) -> Option<i64> {
+    if v.is_empty() {
+        return Some(0);
+    }
+    let parts: Vec<&str> = v.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let mut n = 0i64;
+    for p in parts {
+        if p.is_empty() || p.len() > 4 || !p.bytes().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        n = n * 10_000 + p.parse::<i64>().ok()?;
+    }
+    Some(n)
+}
+
+/// The inverse of [`parse_version`].
+pub fn format_version(n: i64) -> String {
+    if n <= 0 {
+        return String::new();
+    }
+    format!("{}.{}.{}", n / 100_000_000, n / 10_000 % 10_000, n % 10_000)
+}
+
+impl Settings {
+    /// `client_versions` of `/v1/info`: {platform: {"latest", "min"}} with only what is set,
+    /// None when nothing is announced.
+    pub fn client_versions_json(&self) -> Option<Value> {
+        let mut out = Map::new();
+        for (i, platform) in ["desktop", "android", "ios"].into_iter().enumerate() {
+            let mut m = Map::new();
+            for (j, key) in ["latest", "min"].into_iter().enumerate() {
+                let v = self.client_versions[i * 2 + j];
+                if v > 0 {
+                    m.insert(key.into(), Value::String(format_version(v)));
+                }
+            }
+            if !m.is_empty() {
+                out.insert(platform.into(), Value::Object(m));
+            }
+        }
+        (!out.is_empty()).then_some(Value::Object(out))
+    }
 }
 
 impl Settings {
@@ -42,11 +104,12 @@ impl Settings {
             pow_adaptive_threshold: 100,
             // ~10 s on a phone (each bit doubles the work of the default 20 bits).
             pow_adaptive_max_bits: 23,
+            client_versions: [0; 6],
         }
     }
 }
 
-pub const NAMES: [&str; 9] = [
+pub const NAMES: [&str; 15] = [
     "registration_enabled",
     "pow_bits",
     "max_devices",
@@ -56,6 +119,12 @@ pub const NAMES: [&str; 9] = [
     "pow_adaptive",
     "pow_adaptive_threshold",
     "pow_adaptive_max_bits",
+    "client_latest_desktop",
+    "client_min_desktop",
+    "client_latest_android",
+    "client_min_android",
+    "client_latest_ios",
+    "client_min_ios",
 ];
 
 /// Inclusive range of the integer settings an admin may set.
@@ -90,6 +159,12 @@ pub fn validate_changes(body: &Value) -> Result<Vec<Change>, String> {
             out.push((name, None));
             continue;
         }
+        if VERSION_NAMES.contains(&name) {
+            let text = v.as_str().map(str::trim).ok_or_else(|| format!("{name} must be a string"))?;
+            let n = parse_version(text).ok_or_else(|| format!("{name} must be a version like 1.2.3, or empty"))?;
+            out.push((name, Some(Value::String(format_version(n)))));
+            continue;
+        }
         let value = match range(name) {
             None => Value::Bool(v.as_bool().ok_or_else(|| format!("{name} must be a boolean"))?),
             Some((min, max)) => {
@@ -116,6 +191,10 @@ fn apply(s: &mut Settings, name: &str, v: &Value) -> bool {
         ("pow_adaptive", Value::Bool(b)) => s.pow_adaptive = *b,
         ("pow_adaptive_threshold", v) if v.is_i64() => s.pow_adaptive_threshold = v.as_i64().unwrap_or_default(),
         ("pow_adaptive_max_bits", v) if v.is_i64() => s.pow_adaptive_max_bits = v.as_i64().unwrap_or_default(),
+        (name, Value::String(text)) => match (VERSION_NAMES.iter().position(|n| *n == name), parse_version(text)) {
+            (Some(i), Some(n)) => s.client_versions[i] = n,
+            _ => return false,
+        },
         _ => return false,
     }
     true
@@ -235,7 +314,10 @@ fn value_of(s: &Settings, name: &str) -> Value {
         "pow_adaptive" => Value::Bool(s.pow_adaptive),
         "pow_adaptive_threshold" => s.pow_adaptive_threshold.into(),
         "pow_adaptive_max_bits" => s.pow_adaptive_max_bits.into(),
-        _ => Value::Null,
+        name => match VERSION_NAMES.iter().position(|n| *n == name) {
+            Some(i) => Value::String(format_version(s.client_versions[i])),
+            None => Value::Null,
+        },
     }
 }
 
@@ -290,5 +372,34 @@ mod tests {
         assert_eq!(rt.get().max_devices, 6);
         assert_eq!(rt.describe()["max_devices"]["source"], "env");
         assert_eq!(rt.describe()["registration_enabled"]["source"], "override");
+    }
+
+    #[test]
+    fn client_versions() {
+        assert_eq!(parse_version(""), Some(0));
+        assert_eq!(parse_version("1.0.1"), Some(100_000_001));
+        assert!(parse_version("0.1.10") > parse_version("0.1.9"));
+        assert!(parse_version("1.0.0") > parse_version("0.99.99"));
+        for bad in ["1.0", "1.0.0.0", "1.0.x", "v1.0.0", "1..0", "1.0.12345", " 1.0.0"] {
+            assert_eq!(parse_version(bad), None, "{bad}");
+        }
+        assert_eq!(format_version(parse_version("12.3.45").unwrap()), "12.3.45");
+        let ok = |v: Value| validate_changes(&v).is_ok();
+        assert!(ok(json!({"client_latest_ios": "1.0.1"})));
+        assert!(ok(json!({"client_min_ios": ""})));
+        assert!(!ok(json!({"client_latest_ios": "1.0"})));
+        assert!(!ok(json!({"client_latest_ios": 101})));
+
+        let rt = Runtime::new(env());
+        assert_eq!(rt.get().client_versions_json(), None);
+        assert_eq!(rt.describe()["client_latest_desktop"], json!({"value": "", "source": "env"}));
+        rt.apply_changes(&validate_changes(&json!({"client_latest_desktop": "0.1.2", "client_min_desktop": "0.1.0", "client_latest_ios": " 1.0.1 "})).unwrap());
+        assert_eq!(
+            rt.get().client_versions_json(),
+            Some(json!({"desktop": {"latest": "0.1.2", "min": "0.1.0"}, "ios": {"latest": "1.0.1"}}))
+        );
+        assert_eq!(rt.describe()["client_latest_ios"], json!({"value": "1.0.1", "source": "override"}));
+        rt.apply_changes(&validate_changes(&json!({"client_latest_ios": null, "client_min_desktop": ""})).unwrap());
+        assert_eq!(rt.get().client_versions_json(), Some(json!({"desktop": {"latest": "0.1.2"}})));
     }
 }

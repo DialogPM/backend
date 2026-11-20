@@ -1,5 +1,7 @@
 //! Attachments: slot creation, streaming upload into object storage, download (API section 9).
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::body::{Body, HttpBody};
@@ -18,8 +20,8 @@ use super::keys::null_default;
 use super::{no_content, reply};
 use crate::auth::Principal;
 use crate::error::{
-    bad_request, conflict, forbidden, internal_from, not_found, storage_unavailable, too_large,
-    ApiError, ApiResult,
+    bad_request, conflict, forbidden, internal_from, not_found, rate_limited, storage_unavailable,
+    too_large, ApiError, ApiResult,
 };
 use crate::ids;
 use crate::state::AppState;
@@ -33,6 +35,50 @@ pub const ATTACHMENT_UPLOADED: i64 = 2;
 
 pub const KIND_MESSAGE: &str = "message";
 pub const KIND_AVATAR: &str = "avatar";
+
+/// Avatars are kept for as long as anything may refer to them (they never expire), so they
+/// get a much smaller limit than message attachments. Clients upload a 512x512 JPEG,
+/// encrypted, and refuse to download avatars above 8 MiB.
+pub const MAX_AVATAR_BYTES: i64 = 8 << 20;
+
+/// Uploads one account may stream at the same time (each holds a connection and up to 32 MiB
+/// of memory or a temporary file). Clients upload the attachments of a message one by one.
+const MAX_CONCURRENT_UPLOADS: usize = 8;
+
+/// Uploads in progress per account.
+#[derive(Default)]
+pub struct UploadSlots(Arc<Mutex<HashMap<String, usize>>>);
+
+/// One upload in progress; released when dropped.
+pub struct UploadSlot {
+    slots: Arc<Mutex<HashMap<String, usize>>>,
+    account: String,
+}
+
+impl UploadSlots {
+    /// None when the account already has `max` uploads in progress.
+    pub fn acquire(&self, account: &str, max: usize) -> Option<UploadSlot> {
+        let mut m = self.0.lock().unwrap();
+        let n = m.entry(account.to_string()).or_insert(0);
+        if *n >= max {
+            return None;
+        }
+        *n += 1;
+        Some(UploadSlot { slots: self.0.clone(), account: account.to_string() })
+    }
+}
+
+impl Drop for UploadSlot {
+    fn drop(&mut self) {
+        let mut m = self.slots.lock().unwrap();
+        if let Some(n) = m.get_mut(&self.account) {
+            *n -= 1;
+            if *n == 0 {
+                m.remove(&self.account);
+            }
+        }
+    }
+}
 
 /// Deadline for streaming `size` bytes: a fixed allowance plus a very conservative minimum
 /// throughput of 64 KiB/s.
@@ -60,10 +106,19 @@ pub async fn create(State(st): State<AppState>, p: Principal, body: Body) -> Api
     if req.kind != KIND_MESSAGE && req.kind != KIND_AVATAR {
         return Err(bad_request("kind must be message or avatar"));
     }
+    if req.kind == KIND_AVATAR && size > MAX_AVATAR_BYTES {
+        return Err(too_large("avatar exceeds the avatar size limit"));
+    }
+    // The account row is locked while the quota is checked and the slot inserted, so that
+    // parallel requests cannot each see the same remaining quota.
+    let mut tx = st.db.begin().await?;
+    sqlx::query!("SELECT id FROM accounts WHERE id = ? FOR UPDATE", &p.account)
+        .fetch_optional(&mut *tx)
+        .await?;
     // Per-account daily quota (declared sizes, including uploads that never completed).
     // SUM is a DECIMAL: read it as text and parse, like RowExt::i64 did.
     let used: i64 = sqlx::query!("SELECT COALESCE(SUM(size), 0) AS `used!: String` FROM attachments WHERE owner_id = ? AND created_at > ?", &p.account, crate::now_millis() - 24 * 3600 * 1000)
-        .fetch_one(&st.db)
+        .fetch_one(&mut *tx)
         .await?
         .used
         .split('.')
@@ -89,8 +144,9 @@ pub async fn create(State(st): State<AppState>, p: Principal, body: Body) -> Api
         ATTACHMENT_CREATED,
         crate::now_millis()
     )
-    .execute(&st.db)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(reply(StatusCode::OK, json!({"id": id})))
 }
 
@@ -129,6 +185,10 @@ pub async fn upload(
             return Err(bad_request("body length does not match the declared size"));
         }
     }
+    // Before the attachment's slot is claimed, so that a refused upload can be retried.
+    let Some(slot) = st.uploads.acquire(&p.account, MAX_CONCURRENT_UPLOADS) else {
+        return Err(rate_limited(Duration::from_secs(5)));
+    };
     // Claim the upload slot atomically (only once).
     let res =
         sqlx::query!("UPDATE attachments SET state = ? WHERE id = ? AND owner_id = ? AND state = ?", ATTACHMENT_UPLOADING, &id, &p.account, ATTACHMENT_CREATED)
@@ -140,7 +200,10 @@ pub async fn upload(
     // From here on the transfer runs in its own task, so the slot is released (or the upload
     // completed) even if the client goes away and this request future is dropped.
     let st2 = st.clone();
-    tokio::spawn(async move { store_upload(&st2, &id, size, body).await })
+    tokio::spawn(async move {
+        let _slot = slot;
+        store_upload(&st2, &id, size, body).await
+    })
         .await
         .map_err(|e| internal_from("attachment upload task failed", e))?
 }
@@ -228,4 +291,53 @@ pub async fn download(
         .header(header::CONTENT_LENGTH, size.to_string())
         .body(Body::from_stream(stream))
         .map_err(|e| internal_from("build download response", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transfer_deadline_grows_with_size() {
+        assert_eq!(transfer_timeout(0), Duration::from_secs(300));
+        assert_eq!(transfer_timeout(-1), Duration::from_secs(300));
+        assert_eq!(transfer_timeout((64 << 10) - 1), Duration::from_secs(300));
+        assert_eq!(transfer_timeout(60 * (64 << 10)), Duration::from_secs(360));
+        // 100 MiB at 64 KiB/s.
+        assert_eq!(transfer_timeout(100 << 20), Duration::from_secs(300 + 1600));
+    }
+
+    #[test]
+    fn attachment_ids_in_paths() {
+        let id = ids::new_attachment_id();
+        assert_eq!(path_attachment_id(&id).unwrap(), id);
+        for bad in ["", "abc", &id.to_uppercase(), &format!("{id}0"), "../../etc/passwd", &"g".repeat(32)] {
+            assert_eq!(path_attachment_id(bad).unwrap_err().status, StatusCode::BAD_REQUEST, "{bad}");
+        }
+    }
+
+    #[test]
+    fn concurrent_uploads_per_account() {
+        let slots = UploadSlots::default();
+        let mut a: Vec<UploadSlot> = (0..3).map(|_| slots.acquire("a", 3).unwrap()).collect();
+        assert!(slots.acquire("a", 3).is_none());
+        // Other accounts are not affected.
+        let b = slots.acquire("b", 3).unwrap();
+        a.pop();
+        let again = slots.acquire("a", 3).unwrap();
+        assert!(slots.acquire("a", 3).is_none());
+        drop(again);
+        drop(a);
+        assert!(slots.0.lock().unwrap().get("a").is_none());
+        drop(b);
+        assert!(slots.0.lock().unwrap().get("b").is_none(), "released accounts are forgotten");
+    }
+
+    #[test]
+    fn create_request_fields_are_optional() {
+        let r: CreateRequest = crate::validate::parse_json_bytes(br#"{"size":10,"kind":"avatar"}"#).unwrap();
+        assert_eq!((r.size, r.kind.as_str()), (Some(10), KIND_AVATAR));
+        let r: CreateRequest = crate::validate::parse_json_bytes(br#"{"kind":null}"#).unwrap();
+        assert_eq!((r.size, r.kind.as_str()), (None, ""));
+    }
 }

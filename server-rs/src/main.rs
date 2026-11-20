@@ -254,6 +254,7 @@ async fn run() -> Result<(), String> {
         kt: Arc::new(keytrans::KtLog::new(&cfg.server_secret)),
         settings: runtime_settings,
         admin,
+        uploads: Default::default(),
     }));
 
     let app = api::router(st.clone());
@@ -276,7 +277,7 @@ async fn run() -> Result<(), String> {
         "listening"
     );
 
-    serve(listener, app, hub).await;
+    serve(listener, app, hub, cfg.max_connections as usize).await;
     push.close(Duration::from_secs(20)).await;
     jobs.abort();
     kt_sequencer.abort();
@@ -301,9 +302,12 @@ async fn shutdown_signal() {
 }
 
 /// HTTP server with connection limits like the Go server's (10 s to read request headers,
-/// which also bounds idle keep-alive connections; 64 KiB of headers) and its shutdown order: stop accepting, wait up
-/// to 20 s for in-flight requests, then close the WebSockets.
-async fn serve(listener: tokio::net::TcpListener, app: axum::Router, hub: Arc<ws::Hub>) {
+/// which also bounds idle keep-alive connections; 64 KiB of headers; request bodies have their
+/// own read deadlines, see validate::read_body) and its shutdown order: stop accepting, wait up
+/// to 20 s for in-flight requests, then close the WebSockets. At most `max_connections` HTTP
+/// connections are served at once: beyond that, new ones wait in the listen backlog (a
+/// connection upgraded to a WebSocket no longer counts).
+async fn serve(listener: tokio::net::TcpListener, app: axum::Router, hub: Arc<ws::Hub>, max_connections: usize) {
     use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
     use hyper_util::server::conn::auto::Builder;
     use tower::ServiceExt;
@@ -319,7 +323,17 @@ async fn serve(listener: tokio::net::TcpListener, app: axum::Router, hub: Arc<ws
     let graceful = hyper_util::server::graceful::GracefulShutdown::new();
     let signal = shutdown_signal();
     tokio::pin!(signal);
+    let slots = Arc::new(tokio::sync::Semaphore::new(max_connections.max(1)));
+    let mut warned_full: Option<tokio::time::Instant> = None;
     loop {
+        if slots.available_permits() == 0 && warned_full.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
+            warn!(max_connections, "connection limit reached; new connections wait");
+            warned_full = Some(tokio::time::Instant::now());
+        }
+        let permit = tokio::select! {
+            p = slots.clone().acquire_owned() => p.expect("connection semaphore is never closed"),
+            _ = &mut signal => break,
+        };
         let (stream, peer) = tokio::select! {
             r = listener.accept() => match r {
                 Ok(c) => c,
@@ -339,6 +353,7 @@ async fn serve(listener: tokio::net::TcpListener, app: axum::Router, hub: Arc<ws
         let conn = builder.serve_connection_with_upgrades(TokioIo::new(stream), svc).into_owned();
         let conn = graceful.watch(conn);
         tokio::spawn(async move {
+            let _permit = permit;
             if let Err(e) = conn.await {
                 debug!(error = %e, "connection error");
             }
@@ -376,5 +391,32 @@ async fn connect_storage(cfg: &Config) -> Result<Arc<dyn storage::Store>, String
             }
             Err(e) => return Err(format!("object storage: {e}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn listen_address_forms() {
+        // Go's ":port" means every address, IPv4 and IPv6.
+        assert_eq!(listen_addr(":8080"), "[::]:8080");
+        assert_eq!(listen_addr("127.0.0.1:8081"), "127.0.0.1:8081");
+        assert_eq!(listen_addr("[::1]:9"), "[::1]:9");
+    }
+
+    #[tokio::test]
+    async fn binds_a_free_port() {
+        let l = bind("127.0.0.1:0").unwrap();
+        assert_ne!(l.local_addr().unwrap().port(), 0);
+        assert!(bind("not an address").is_err());
+    }
+
+    #[test]
+    fn clock_is_in_milliseconds() {
+        // After 2020 and before 2100, in ms.
+        let now = now_millis();
+        assert!(now > 1_577_836_800_000 && now < 4_102_444_800_000, "{now}");
     }
 }

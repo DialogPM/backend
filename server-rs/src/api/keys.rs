@@ -358,3 +358,38 @@ async fn take_one_time_key(
         .await?;
     Ok(Some(k))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_lengths() {
+        assert!(validate_ec_key("k", &[5; EC_PUBLIC_KEY_LEN]).is_ok());
+        assert!(validate_ec_key("k", &[5; EC_PUBLIC_KEY_LEN - 1]).is_err());
+        assert!(validate_ec_key("k", &[5; EC_PUBLIC_KEY_LEN + 1]).is_err());
+        assert!(validate_kyber_key("k", &[]).is_err());
+        assert!(validate_kyber_key("k", &[1]).is_ok());
+        assert!(validate_kyber_key("k", &vec![1; MAX_KYBER_PUBLIC_KEY_LEN]).is_ok());
+        assert!(validate_kyber_key("k", &vec![1; MAX_KYBER_PUBLIC_KEY_LEN + 1]).is_err());
+    }
+
+    #[test]
+    fn upload_request_tolerates_nulls_like_go() {
+        let req: PutKeysRequest = crate::validate::parse_json_bytes(
+            br#"{"signed_prekey":{"id":null,"public_key":"AQI=","signature":null},
+                 "kyber_last_resort":null,"prekeys":null,
+                 "kyber_prekeys":[{"id":7,"public_key":"Aw==","signature":"BA=="}]}"#,
+        )
+        .unwrap();
+        let spk = req.signed_prekey.unwrap();
+        assert_eq!((spk.id, spk.public_key, spk.signature), (0, vec![1, 2], vec![]));
+        assert!(req.kyber_last_resort.is_none());
+        assert!(req.prekeys.is_empty());
+        assert_eq!(req.kyber_prekeys.len(), 1);
+        assert_eq!((req.kyber_prekeys[0].id, &req.kyber_prekeys[0].public_key), (7, &vec![3]));
+        // An empty object is an upload of nothing.
+        let req: PutKeysRequest = crate::validate::parse_json_bytes(b"{}").unwrap();
+        assert!(req.signed_prekey.is_none() && req.prekeys.is_empty() && req.kyber_prekeys.is_empty());
+    }
+}

@@ -526,6 +526,7 @@ pub async fn create(
     body: Body,
 ) -> ApiResult {
     let auth = group_auth(&st, &headers, peer)?;
+    st.rate_limit(&format!("groupsv2-create:ip:{}", st.client_ip(&headers, peer)), st.limits.group_create_ip)?;
     let req: CreateRequest = parse_json(body, MAX_JSON_BODY).await?;
     valid_blob("attributes", &req.attributes)?;
     valid_blob("settings", &req.settings)?;
@@ -785,6 +786,11 @@ struct SendRequest {
     recipients: Vec<Recipient>,
 }
 
+/// Rate limit key of the envelope budget of group sends (v1 and v2 share it).
+pub fn group_send_key(account: &str) -> String {
+    format!("group-send:acct:{account}")
+}
+
 fn refs_json(refs: &[&(String, i64)]) -> Value {
     Value::Array(refs.iter().map(|(a, d)| json!({ "account_id": a, "device_id": d })).collect())
 }
@@ -816,15 +822,10 @@ pub async fn send(State(st): State<AppState>, p: Principal, body: Body) -> ApiRe
     }
     // Until stage 4 the server cannot tell that the sender and the recipients share a group:
     // any account could fan out to any 256 accounts. Budget the envelopes per sender.
-    st.rate_limit_n(
-        &format!("groupsv2-send:acct:{}", p.account),
-        st.limits.group_send_account,
-        given.len().min(u32::MAX as usize) as u32,
-    )?;
-    if !req.online {
-        let bytes = (req.content.len() as u64 * given.len() as u64).min(u32::MAX as u64) as u32;
-        super::messages::charge_sender(&st, &format!("acct:{}", p.account), bytes)?;
-    }
+    st.rate_limit_n(&group_send_key(&p.account), st.limits.group_send_account, given.len().min(u32::MAX as usize) as u32)?;
+    // Online sends are charged like stored ones: they still reach every recipient's socket.
+    let bytes = (req.content.len() as u64 * given.len() as u64).min(u32::MAX as u64) as u32;
+    super::messages::charge_sender(&st, &format!("acct:{}", p.account), bytes)?;
     // The tag of a v2 send is chosen by the sender. It must not be the id of a v1 group, whose
     // sends go through PUT /v1/groups/{id}/messages and its membership and only-admins checks:
     // the envelopes would look the same to the recipients.

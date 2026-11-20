@@ -305,9 +305,13 @@ async fn retry_deadlocks(req: axum::extract::Request, next: axum::middleware::Ne
         return next.run(req).await;
     }
     let (parts, body) = req.into_parts();
-    let bytes = match axum::body::to_bytes(body, MAX_RETRY_BODY as usize).await {
-        Ok(b) => b,
-        Err(_) => return crate::error::bad_request("could not read request body").into_response(),
+    // Read before the handler authenticates: the deadline (for the declared length) keeps a
+    // slow sender from holding the buffer.
+    let deadline = crate::validate::body_read_timeout(declared.unwrap_or(0));
+    let bytes = match tokio::time::timeout(deadline, axum::body::to_bytes(body, MAX_RETRY_BODY as usize)).await {
+        Ok(Ok(b)) => b,
+        Ok(Err(_)) => return crate::error::bad_request("could not read request body").into_response(),
+        Err(_) => return crate::validate::body_timeout().into_response(),
     };
     let mut attempt = 0;
     loop {
@@ -341,29 +345,32 @@ async fn fallback() -> ApiError {
 
 async fn info(State(st): State<AppState>) -> Response {
     let s = st.settings.get();
-    reply(
-        StatusCode::OK,
-        json!({
-            "name": st.cfg.server_name,
-            "version": VERSION,
-            "registration_enabled": s.registration_enabled,
-            "phone_verification_enabled": st.sms.is_some(),
-            "max_attachment_bytes": s.attachment_max_bytes,
-            "max_devices": s.max_devices,
-            "push_enabled": st.push.enabled(),
-            "voip_push_enabled": st.push.voip_enabled(),
-            "turn_enabled": !st.cfg.turn_urls.is_empty(),
-            // Clients pin this key and check sender certificates of sealed messages against it.
-            "sealed_sender_trust_root": crate::validate::b64::encode(&st.sealed.trust_root_serialized()),
-            // Clients pin these and verify the zkgroup credentials the server issues.
-            "zkgroup_public_params": crate::validate::b64::encode(&st.zk.public_serialized),
-            // Private groups v2 (API section "Groups v2"); whether clients create new groups as v2.
-            "groups_v2": true,
-            "groups_v2_default": groups_v2::default_on(),
-            // Clients pin this key and verify the key transparency tree heads with it.
-            "kt_public_key": crate::validate::b64::encode(&st.kt.public_key),
-        }),
-    )
+    let mut body = json!({
+        "name": st.cfg.server_name,
+        "version": VERSION,
+        "registration_enabled": s.registration_enabled,
+        "phone_verification_enabled": st.sms.is_some(),
+        "max_attachment_bytes": s.attachment_max_bytes,
+        "max_devices": s.max_devices,
+        "push_enabled": st.push.enabled(),
+        "voip_push_enabled": st.push.voip_enabled(),
+        "turn_enabled": !st.cfg.turn_urls.is_empty(),
+        // Clients pin this key and check sender certificates of sealed messages against it.
+        "sealed_sender_trust_root": crate::validate::b64::encode(&st.sealed.trust_root_serialized()),
+        // Clients pin these and verify the zkgroup credentials the server issues.
+        "zkgroup_public_params": crate::validate::b64::encode(&st.zk.public_serialized),
+        // Private groups v2 (API section "Groups v2"); whether clients create new groups as v2.
+        "groups_v2": true,
+        "groups_v2_default": groups_v2::default_on(),
+        // Clients pin this key and verify the key transparency tree heads with it.
+        "kt_public_key": crate::validate::b64::encode(&st.kt.public_key),
+    });
+    // The app versions the operator announces (admin settings): an app older than "latest"
+    // offers its update, one older than "min" requires it. Absent when nothing is announced.
+    if let Some(v) = s.client_versions_json() {
+        body["client_versions"] = v;
+    }
+    reply(StatusCode::OK, body)
 }
 
 async fn health(State(st): State<AppState>) -> ApiResult {
@@ -418,4 +425,38 @@ pub async fn query_strings<'q>(
         .iter()
         .map(|r| r.string(r.column(0).name()))
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn query_int_defaults_and_bounds() {
+        assert_eq!(query_int(None, "limit", 100, 1, 1000).unwrap(), 100);
+        assert_eq!(query_int(Some("other=5"), "limit", 100, 1, 1000).unwrap(), 100);
+        assert_eq!(query_int(Some("limit="), "limit", 100, 1, 1000).unwrap(), 100);
+        assert_eq!(query_int(Some("a=b&limit=5"), "limit", 100, 1, 1000).unwrap(), 5);
+        assert_eq!(query_int(Some("limit=1"), "limit", 100, 1, 1000).unwrap(), 1);
+        assert_eq!(query_int(Some("limit=1000"), "limit", 100, 1, 1000).unwrap(), 1000);
+        // The first occurrence counts.
+        assert_eq!(query_int(Some("limit=7&limit=9"), "limit", 100, 1, 1000).unwrap(), 7);
+        for bad in ["limit=0", "limit=1001", "limit=-1", "limit=abc", "limit=1.5", "limit=99999999999999999999"] {
+            let e = query_int(Some(bad), "limit", 100, 1, 1000).unwrap_err();
+            assert_eq!(e.status, StatusCode::BAD_REQUEST, "{bad}");
+        }
+    }
+
+    #[tokio::test]
+    async fn replies() {
+        let r = reply(StatusCode::CREATED, json!({"id": "x"}));
+        assert_eq!(r.status(), StatusCode::CREATED);
+        assert_eq!(r.headers().get(header::CONTENT_TYPE).unwrap(), "application/json");
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&body[..], br#"{"id":"x"}"#);
+        let r = no_content();
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX).await.unwrap();
+        assert!(body.is_empty());
+    }
 }

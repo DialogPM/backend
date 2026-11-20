@@ -90,10 +90,6 @@ async fn require_signature(State(st): State<AppState>, req: axum::extract::Reque
         return not_found("no such endpoint").into_response();
     };
     let (parts, body) = req.into_parts();
-    let bytes = match crate::validate::read_body(body, MAX_ADMIN_BODY).await {
-        Ok(b) => b,
-        Err(e) => return e.into_response(),
-    };
     let path_q = parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or_else(|| parts.uri.path());
     let hdr = |name: &str| parts.headers.get(name).and_then(|v| v.to_str().ok()).unwrap_or("");
     let signed = auth::SignedHeaders {
@@ -102,8 +98,18 @@ async fn require_signature(State(st): State<AppState>, req: axum::extract::Reque
         nonce: hdr(auth::HEADER_NONCE),
         signature: hdr(auth::HEADER_SIGNATURE),
     };
-    match admin.verifier.verify(parts.method.as_str(), path_q, &signed, &bytes, crate::now_millis()) {
-        Ok(fingerprint) => {
+    let now = crate::now_millis();
+    // Headers first: a request without a configured key or with a stale timestamp is refused
+    // before its body is read or any signature is verified.
+    let checked = match admin.verifier.precheck(&signed, now) {
+        Ok(()) => match crate::validate::read_body(body, MAX_ADMIN_BODY).await {
+            Ok(bytes) => admin.verifier.verify(parts.method.as_str(), path_q, &signed, &bytes, now).map(|f| (f, bytes)),
+            Err(e) => return e.into_response(),
+        },
+        Err(reason) => Err(reason),
+    };
+    match checked {
+        Ok((fingerprint, bytes)) => {
             // Never the query string or the body (they may hold account numbers or reasons).
             info!(method = %parts.method, path = %parts.uri.path(), key = %fingerprint, "admin request");
             next.run(axum::http::Request::from_parts(parts, Body::from(bytes))).await

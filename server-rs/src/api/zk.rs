@@ -28,7 +28,14 @@ pub async fn group_auth_credentials(State(st): State<AppState>, p: Principal, Ra
     let now = crate::now_millis() / 1000;
     let today = now - now.rem_euclid(DAY);
     let start = query_int(q.as_deref(), "redemption_start_seconds", today, 0, i64::MAX)?;
-    let end = query_int(q.as_deref(), "redemption_end_seconds", start + (MAX_CREDENTIAL_DAYS as i64 - 1) * DAY, 0, i64::MAX)?;
+    // Saturating: start may be any non-negative integer here (checked against the range below).
+    let end = query_int(
+        q.as_deref(),
+        "redemption_end_seconds",
+        start.saturating_add((MAX_CREDENTIAL_DAYS as i64 - 1) * DAY),
+        0,
+        i64::MAX,
+    )?;
     if !day_aligned(start as u64) || !day_aligned(end as u64) {
         return Err(bad_request("redemption times must be day-aligned (UTC midnight)"));
     }
@@ -38,6 +45,8 @@ pub async fn group_auth_credentials(State(st): State<AppState>, p: Principal, Ra
     if start < today - DAY || end > today + MAX_CREDENTIAL_DAYS as i64 * DAY {
         return Err(bad_request("redemption times out of range"));
     }
+    // Each credential costs a few zkgroup operations; clients fetch a week at a time.
+    st.rate_limit(&format!("zk-auth:acct:{}", p.account), st.limits.zk_credentials_account)?;
     let account = uuid::Uuid::parse_str(&p.account).map_err(|_| crate::error::internal())?;
     let zk = st.zk.clone();
     let credentials = tokio::task::spawn_blocking(move || {

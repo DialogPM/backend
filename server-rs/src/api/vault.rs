@@ -191,3 +191,21 @@ pub async fn get_records(
     out.truncate(limit as usize);
     Ok(reply(StatusCode::OK, json!({"records": out, "more": more})))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_ids() {
+        assert!(validate_vault_id("contact:abc").is_ok());
+        assert!(validate_vault_id(&"a".repeat(MAX_VAULT_RECORD_ID_LEN)).is_ok());
+        assert!(validate_vault_id("").is_err());
+        assert!(validate_vault_id(&"a".repeat(MAX_VAULT_RECORD_ID_LEN + 1)).is_err());
+        // The limit is in bytes too (the column is sized for it).
+        assert!(validate_vault_id(&"é".repeat(MAX_VAULT_RECORD_ID_LEN)).is_err());
+        assert!(validate_vault_id("a\nb").is_err());
+        assert!(validate_vault_id("a\u{7f}").is_err());
+        assert!(validate_vault_id("\0").is_err());
+    }
+}

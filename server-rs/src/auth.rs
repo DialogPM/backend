@@ -97,3 +97,41 @@ impl FromRequestParts<AppState> for Principal {
         Ok(p)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parts(uri: &str, authorization: Option<&str>) -> Parts {
+        let mut b = axum::http::Request::builder().uri(uri);
+        if let Some(a) = authorization {
+            b = b.header(axum::http::header::AUTHORIZATION, a);
+        }
+        b.body(()).unwrap().into_parts().0
+    }
+
+    #[test]
+    fn token_from_the_authorization_header() {
+        assert_eq!(bearer_token(&parts("/v1/devices", Some("Bearer abc")), false), "abc");
+        // The scheme is case-insensitive and surrounding spaces are dropped.
+        assert_eq!(bearer_token(&parts("/v1/devices", Some("bEaReR   abc  ")), false), "abc");
+        // Other schemes, and a scheme without a token, give nothing.
+        assert_eq!(bearer_token(&parts("/v1/devices", Some("Basic abc")), false), "");
+        assert_eq!(bearer_token(&parts("/v1/devices", Some("Bearer")), false), "");
+        assert_eq!(bearer_token(&parts("/v1/devices", None), false), "");
+    }
+
+    #[test]
+    fn query_token_only_where_allowed() {
+        // Ordinary requests never take the token from the URL (it would end up in logs).
+        assert_eq!(bearer_token(&parts("/v1/devices?token=abc", None), false), "");
+        // The WebSocket endpoint does, percent-decoded.
+        assert_eq!(bearer_token(&parts("/v1/ws?x=1&token=a%2Db_c", None), true), "a-b_c");
+        assert_eq!(bearer_token(&parts("/v1/ws?x=1", None), true), "");
+        // A header, even a wrong one, wins over the query.
+        assert_eq!(bearer_token(&parts("/v1/ws?token=q", Some("Bearer h")), true), "h");
+        assert_eq!(bearer_token(&parts("/v1/ws?token=q", Some("Basic h")), true), "");
+        // An empty header counts as absent.
+        assert_eq!(bearer_token(&parts("/v1/ws?token=q", Some("")), true), "q");
+    }
+}

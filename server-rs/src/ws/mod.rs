@@ -18,6 +18,7 @@ use tracing::{debug, warn};
 
 use crate::db::{placeholders, RowExt};
 use crate::ids;
+use crate::ratelimit::{LocalBucket, Rule};
 
 /// Another socket of the same device connected.
 pub const STATUS_REPLACED: u16 = 4000;
@@ -36,6 +37,17 @@ const PING_INTERVAL: Duration = Duration::from_secs(30);
 /// Ping every 30 s + 45 s without pong = dead after 75 s.
 const PONG_TIMEOUT: Duration = Duration::from_secs(45);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(15);
+/// Inbound frames per connection: 500 per second sustained, bursts of 5000 (a client acks
+/// every envelope it receives, so a reconnect after a while offline means a burst of acks; the
+/// queue holds up to 10 000 per device). Beyond it the reader slows down (the socket is read
+/// later) instead of dropping frames: an ack that was dropped would make the envelope come
+/// again at the next reconnect. Frames are handled one at a time, so a connection never has
+/// more than one database query of its own in flight.
+const INBOUND_FRAMES: Rule = Rule::new(5000, Duration::from_secs(10));
+/// presence_subscribe frames per connection (each checks up to MAX_SUBSCRIPTIONS access keys
+/// in the database): 10 at once, then one per 6 s. Each frame replaces the previous
+/// subscription, so beyond it only the latest is kept and applied when the budget allows.
+const PRESENCE_SUBSCRIBES: Rule = Rule::new(10, Duration::from_secs(60));
 
 enum OutMsg {
     Data {
@@ -669,9 +681,22 @@ impl Hub {
     ) {
         let last_pong = Arc::new(AtomicI64::new(crate::now_millis()));
         let mut writer = tokio::spawn(writer_loop(self.clone(), h.clone(), sink, rx, last_pong.clone()));
+        let mut frames = LocalBucket::new(INBOUND_FRAMES);
+        let mut subscribes = LocalBucket::new(PRESENCE_SUBSCRIBES);
+        // The latest presence_subscribe over budget, and when the budget allows it.
+        let mut deferred: Option<(Vec<Value>, tokio::time::Instant)> = None;
         // Reader: stops on close/error, or when the writer finished (socket closing).
         loop {
+            let deferred_at = deferred.as_ref().map(|(_, at)| *at);
             tokio::select! {
+                _ = sleep_until_opt(deferred_at) => {
+                    if let Some((subs, at)) = deferred.take() {
+                        match subscribes.take(1) {
+                            Ok(()) => self.presence_subscribe(&h, subs).await,
+                            Err(wait) => deferred = Some((subs, at.max(tokio::time::Instant::now()) + wait)),
+                        }
+                    }
+                }
                 msg = stream.next() => {
                     let msg = match msg {
                         Some(Ok(m)) => m,
@@ -689,7 +714,25 @@ impl Hub {
                         None => break,
                     };
                     match msg {
-                        Message::Text(t) => self.handle_inbound(&h, t.as_str()).await,
+                        Message::Text(t) => {
+                            while let Err(wait) = frames.take(1) {
+                                tokio::time::sleep(wait).await;
+                            }
+                            let Some(m) = parse_inbound(t.as_str()) else { continue };
+                            if m.kind == "presence_subscribe" {
+                                if let Some(d) = deferred.as_mut() {
+                                    // Replaces the waiting one; applied at the same time.
+                                    d.0 = m.subscriptions;
+                                } else {
+                                    match subscribes.take(1) {
+                                        Ok(()) => self.presence_subscribe(&h, m.subscriptions).await,
+                                        Err(wait) => deferred = Some((m.subscriptions, tokio::time::Instant::now() + wait)),
+                                    }
+                                }
+                                continue;
+                            }
+                            self.handle_inbound(&h, m).await;
+                        }
                         Message::Pong(_) => last_pong.store(crate::now_millis(), Ordering::Relaxed),
                         Message::Close(_) => break,
                         _ => {}
@@ -712,28 +755,20 @@ impl Hub {
         writer.abort();
     }
 
-    async fn handle_inbound(&self, h: &ConnHandle, text: &str) {
-        #[derive(Deserialize)]
-        struct Inbound {
-            #[serde(default, rename = "type")]
-            kind: String,
-            #[serde(default)]
-            id: String,
-            /// presence_subscribe: `{"account_id", "access_key"}` objects (see
-            /// `parse_subscriptions`); anything malformed is skipped.
-            #[serde(default)]
-            subscriptions: Vec<Value>,
-            /// presence_state: whether the user is at this device, and since when not.
-            #[serde(default)]
-            active: Option<bool>,
-            #[serde(default)]
-            since: Option<i64>,
-        }
-        // Same decoding rules as HTTP bodies (Go: null = zero value, case-insensitive names).
-        let Ok(v) = serde_json::from_str::<Value>(text) else { return };
-        let Ok(m) = serde_json::from_value::<Inbound>(crate::validate::go_compat(v)) else {
-            return;
+    /// Replaces the socket's presence subscriptions with those whose access key is right.
+    async fn presence_subscribe(&self, h: &ConnHandle, subscriptions: Vec<Value>) {
+        let targets = match self.authorized_targets(parse_subscriptions(subscriptions)).await {
+            Ok(t) => t,
+            Err(e) => {
+                warn!(error = %e, "presence access check failed");
+                return;
+            }
         };
+        self.subscribe(h, targets).await;
+    }
+
+    /// Frames other than presence_subscribe (handled by the reader, see run_conn).
+    async fn handle_inbound(&self, h: &ConnHandle, m: Inbound) {
         match m.kind.as_str() {
             "ack" => {
                 let Some(id) = ids::normalize_uuid(&m.id) else {
@@ -751,19 +786,7 @@ impl Hub {
                     warn!(error = %e, "websocket ack failed");
                 }
             }
-            "presence_subscribe" => {
-                let targets = match self
-                    .authorized_targets(parse_subscriptions(m.subscriptions))
-                    .await
-                {
-                    Ok(t) => t,
-                    Err(e) => {
-                        warn!(error = %e, "presence access check failed");
-                        return;
-                    }
-                };
-                self.subscribe(h, targets).await;
-            }
+            "presence_subscribe" => self.presence_subscribe(h, m.subscriptions).await,
             "presence_state" => {
                 if let Some(active) = m.active {
                     self.set_active(h, active, m.since).await;
@@ -775,6 +798,39 @@ impl Hub {
             }),
             _ => {}
         }
+    }
+}
+
+/// A frame from the client.
+#[derive(Deserialize)]
+struct Inbound {
+    #[serde(default, rename = "type")]
+    kind: String,
+    #[serde(default)]
+    id: String,
+    /// presence_subscribe: `{"account_id", "access_key"}` objects (see
+    /// `parse_subscriptions`); anything malformed is skipped.
+    #[serde(default)]
+    subscriptions: Vec<Value>,
+    /// presence_state: whether the user is at this device, and since when not.
+    #[serde(default)]
+    active: Option<bool>,
+    #[serde(default)]
+    since: Option<i64>,
+}
+
+/// Same decoding rules as HTTP bodies (Go: null = zero value, case-insensitive names); None
+/// for anything that is not such a frame (ignored).
+fn parse_inbound(text: &str) -> Option<Inbound> {
+    let v = serde_json::from_str::<Value>(text).ok()?;
+    serde_json::from_value::<Inbound>(crate::validate::go_compat(v)).ok()
+}
+
+/// Resolves at `at`, never when None.
+async fn sleep_until_opt(at: Option<tokio::time::Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending().await,
     }
 }
 
@@ -994,6 +1050,31 @@ mod presence_access_tests {
             json!({"account_id": "not-a-uuid", "access_key": key}),
         ]);
         assert_eq!(parsed, vec![(A.to_string(), vec![7u8; 16])]);
+    }
+
+    #[test]
+    fn inbound_frames() {
+        let m = parse_inbound(r#"{"Type":"presence_subscribe","subscriptions":[{"account_id":"x"}]}"#).unwrap();
+        assert_eq!((m.kind.as_str(), m.subscriptions.len()), ("presence_subscribe", 1));
+        let m = parse_inbound(r#"{"type":"ack","id":null}"#).unwrap();
+        assert_eq!((m.kind.as_str(), m.id.as_str()), ("ack", ""));
+        assert!(parse_inbound("not json").is_none());
+        assert!(parse_inbound(r#"{"type":5}"#).is_none());
+    }
+
+    #[test]
+    fn honest_bursts_fit_the_inbound_budget() {
+        // A reconnect after being offline: a burst of acks goes through without waiting.
+        let mut frames = LocalBucket::new(INBOUND_FRAMES);
+        for _ in 0..5000 {
+            assert!(frames.take(1).is_ok());
+        }
+        assert!(frames.take(1).unwrap_err() <= Duration::from_millis(3));
+        let mut subs = LocalBucket::new(PRESENCE_SUBSCRIBES);
+        for _ in 0..10 {
+            assert!(subs.take(1).is_ok());
+        }
+        assert!(subs.take(1).unwrap_err() <= Duration::from_secs(6));
     }
 
     #[test]
