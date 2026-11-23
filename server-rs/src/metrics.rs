@@ -118,7 +118,55 @@ pub const REGISTRATIONS: &str = "registrations";
 pub const NEW_DEVICES: &str = "new_devices";
 pub const ENVELOPES_SENT: &str = "envelopes_sent";
 pub const ATTACHMENTS_UPLOADED: &str = "attachments_uploaded";
-pub const DAILY_METRICS: [&str; 4] = [REGISTRATIONS, NEW_DEVICES, ENVELOPES_SENT, ATTACHMENTS_UPLOADED];
+/// Call offers (one per call and callee; the server sees neither answers nor durations).
+pub const CALLS_STARTED: &str = "calls_started";
+/// Accounts that connected at least once that day.
+pub const ACTIVE_ACCOUNTS: &str = "active_accounts";
+pub const DAILY_METRICS: [&str; 6] =
+    [REGISTRATIONS, NEW_DEVICES, ENVELOPES_SENT, ATTACHMENTS_UPLOADED, CALLS_STARTED, ACTIVE_ACCOUNTS];
+
+/// Per-country totals in daily_stats: metric `<prefix><CC>` (e.g. `active:RO`).
+pub const COUNTRY_ACTIVE: &str = "active:";
+pub const COUNTRY_REGISTRATIONS: &str = "reg:";
+
+/// Increments of the per-country totals not yet written: (day, prefix, country) -> count.
+static PENDING_COUNTRIES: Mutex<BTreeMap<(i64, &'static str, [u8; 2]), i64>> = Mutex::new(BTreeMap::new());
+
+/// Counts one account (`COUNTRY_ACTIVE`) or registration (`COUNTRY_REGISTRATIONS`) of
+/// `country` today. Only the total is kept.
+pub fn bump_country(prefix: &'static str, country: [u8; 2]) {
+    let day = crate::now_millis().div_euclid(DAY_MS);
+    *PENDING_COUNTRIES.lock().unwrap().entry((day, prefix, country)).or_default() += 1;
+}
+
+/// How long a call id is remembered, so that an offer sent again (several devices, a retry
+/// after a changed device list) counts as one call.
+const CALL_MEMORY_MS: i64 = 10 * 60 * 1000;
+/// Call ids seen lately (hashed: the id itself is never kept) -> when.
+static RECENT_CALLS: Mutex<BTreeMap<u64, i64>> = Mutex::new(BTreeMap::new());
+
+/// Counts a call offer once per call id.
+pub fn call_started(call_id: &str) {
+    call_started_at(call_id, crate::now_millis());
+}
+
+fn call_started_at(call_id: &str, now: i64) -> bool {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    call_id.hash(&mut h);
+    let key = h.finish();
+    let mut recent = RECENT_CALLS.lock().unwrap();
+    if recent.len() > 100_000 {
+        recent.retain(|_, at| now - *at < CALL_MEMORY_MS);
+    }
+    let new = recent.get(&key).is_none_or(|at| now - *at >= CALL_MEMORY_MS);
+    recent.insert(key, now);
+    drop(recent);
+    if new {
+        bump(CALLS_STARTED, 1);
+    }
+    new
+}
 
 /// Increments not yet written to daily_stats: (day, metric) -> count.
 static PENDING: Mutex<BTreeMap<(i64, &'static str), i64>> = Mutex::new(BTreeMap::new());
@@ -154,6 +202,23 @@ pub async fn flush(db: &MySqlPool) {
             *PENDING.lock().unwrap().entry((day, metric)).or_default() += n;
         }
     }
+    let countries = std::mem::take(&mut *PENDING_COUNTRIES.lock().unwrap());
+    for ((day, prefix, country), n) in countries {
+        let metric = format!("{prefix}{}", String::from_utf8_lossy(&country));
+        let r = sqlx::query(
+            "INSERT INTO daily_stats (day, metric, value) VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE value = value + VALUES(value)",
+        )
+        .bind(day)
+        .bind(&metric)
+        .bind(n)
+        .execute(db)
+        .await;
+        if let Err(e) = r {
+            tracing::warn!(error = %e, "write country statistics failed");
+            *PENDING_COUNTRIES.lock().unwrap().entry((day, prefix, country)).or_default() += n;
+        }
+    }
 }
 
 /// Flushes the daily counters every `interval` (and is aborted at shutdown after a final flush).
@@ -184,6 +249,16 @@ pub fn date_string(day: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_call_is_counted_once_per_call_id() {
+        let t0 = 5_000_000_000;
+        assert!(call_started_at("call-a-for-the-test", t0));
+        assert!(!call_started_at("call-a-for-the-test", t0 + 1_000), "the same offer to another device");
+        assert!(!call_started_at("call-a-for-the-test", t0 + 9 * 60_000), "a retry");
+        assert!(call_started_at("call-b-for-the-test", t0 + 2_000));
+        assert!(call_started_at("call-a-for-the-test", t0 + 9 * 60_000 + CALL_MEMORY_MS), "long after: another call");
+    }
 
     #[test]
     fn rolling_window() {

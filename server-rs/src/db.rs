@@ -95,6 +95,16 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "0017_device_revocation.sql",
         include_str!("../migrations/0017_device_revocation.sql"),
     ),
+    (
+        18,
+        "0018_blocked_usernames.sql",
+        include_str!("../migrations/0018_blocked_usernames.sql"),
+    ),
+    (
+        19,
+        "0019_activity_stats.sql",
+        include_str!("../migrations/0019_activity_stats.sql"),
+    ),
 ];
 
 /// Parses a go-sql-driver style DSN (`user:pass@tcp(host:port)/db?params`) so existing

@@ -309,6 +309,9 @@ pub async fn send_messages(
         insert_envelopes(&mut tx, &envs).await?;
     }
     tx.commit().await?;
+    if let Wake::Call { call_id } = &wake {
+        crate::metrics::call_started(call_id);
+    }
     let push = !req.no_push || matches!(wake, Wake::Call { .. });
     deliver_wake(st, &envs, req.online, push.then_some(&wake));
     Ok(reply(
@@ -477,10 +480,35 @@ pub async fn ack_message(
     Ok(no_content())
 }
 
+/// Daily activity totals (admin statistics): an account is counted the first time it connects
+/// in a day, in total and, with a GeoIP database, for the country it connects from. The
+/// country goes into that day's total only; the account keeps just the day it was counted.
+async fn count_active(st: &AppState, account: &str, country: Option<crate::geoip::Country>) {
+    let today = crate::metrics::day_of(crate::now_millis());
+    let first = sqlx::query("UPDATE accounts SET stats_day = ? WHERE id = ? AND (stats_day IS NULL OR stats_day < ?)")
+        .bind(today)
+        .bind(account)
+        .bind(today)
+        .execute(&st.db)
+        .await;
+    match first {
+        Ok(r) if r.rows_affected() == 1 => {
+            crate::metrics::bump(crate::metrics::ACTIVE_ACCOUNTS, 1);
+            if let Some(country) = country {
+                crate::metrics::bump_country(crate::metrics::COUNTRY_ACTIVE, country);
+            }
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!(error = %e, "count active account failed"),
+    }
+}
+
 /// Upgrades an authenticated request to the delivery socket.
 pub async fn websocket(
     State(st): State<AppState>,
     p: Principal,
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
     RawQuery(query): RawQuery,
     ws: Result<WebSocketUpgrade, axum::extract::ws::rejection::WebSocketUpgradeRejection>,
 ) -> Response {
@@ -501,6 +529,7 @@ pub async fn websocket(
         // Like coder/websocket: a request that is not a WebSocket handshake gets 426.
         Err(e) => return (StatusCode::UPGRADE_REQUIRED, e.body_text()).into_response(),
     };
+    count_active(&st, &p.account, st.client_country(&headers, peer)).await;
     let hub = st.hub.clone();
     ws.max_message_size(256 << 10)
         .on_upgrade(move |socket| hub.serve(socket, p.account, p.device, privacy == "nobody", active))

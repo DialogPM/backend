@@ -85,6 +85,10 @@ services:
       # backup script writes status.json into this directory; set
       # CHATAPP_BACKUP_STATUS_FILE=/run/backup-status/status.json in .env.
       # - /var/lib/dialog-backup-status:/run/backup-status:ro
+      # Optional: country statistics for the admin API (docs/ADMIN-API.md). Put the unpacked
+      # DB-IP "IP to Country Lite" CSV into ./geoip and set
+      # CHATAPP_GEOIP_DB=/run/geoip/dbip-country-lite.csv in .env.
+      - ${CHATAPP_GEOIP_DIR:-./geoip}:/run/geoip:ro
       # Optional: commit shown in the admin overview (a deploy script can write it).
       # - ./DEPLOYED_COMMIT:/app/DEPLOYED_COMMIT:ro
     healthcheck:

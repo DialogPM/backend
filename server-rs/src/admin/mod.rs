@@ -7,6 +7,7 @@
 pub mod auth;
 pub mod logbuf;
 pub mod moderation;
+pub mod usernames;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -65,6 +66,7 @@ pub fn routes(st: &AppState) -> Router<AppState> {
     Router::new()
         .route("/v1/admin/overview", get(overview))
         .route("/v1/admin/stats", get(stats))
+        .route("/v1/admin/countries", get(countries))
         .route("/v1/admin/reports", get(list_reports))
         .route("/v1/admin/reports/{id}/resolve", post(resolve_report))
         .route("/v1/admin/accounts", get(search_accounts))
@@ -72,6 +74,10 @@ pub fn routes(st: &AppState) -> Router<AppState> {
         .route("/v1/admin/accounts/{id}/ban", post(ban))
         .route("/v1/admin/accounts/{id}/unban", post(unban))
         .route("/v1/admin/accounts/{id}/logout", post(logout))
+        .route("/v1/admin/usernames", get(usernames::list))
+        .route("/v1/admin/usernames/matches", get(usernames::matches))
+        .route("/v1/admin/usernames/block", post(usernames::block))
+        .route("/v1/admin/usernames/unblock", post(usernames::unblock))
         .route("/v1/admin/settings", get(get_settings).put(put_settings))
         .route("/v1/admin/queue/purge", post(purge_queue))
         .route("/v1/admin/security", get(security))
@@ -383,6 +389,57 @@ async fn overview(State(st): State<AppState>) -> ApiResult {
     );
     o.insert("backup".into(), backup_status(&st.cfg.backup_status_file));
     Ok(reply(StatusCode::OK, v))
+}
+
+// --- GET /countries ------------------------------------------------------------------------
+
+/// Accounts active and registered per country over the last `days` days: daily totals only
+/// (metrics.rs), from the country of the address at connection time (geoip.rs).
+async fn countries(State(st): State<AppState>, RawQuery(q): RawQuery) -> ApiResult {
+    let p = params(&q);
+    let days = int_param(&p, "days", 30, 1, 365)?;
+    metrics::flush(&st.db).await;
+    let today = metrics::day_of(crate::now_millis());
+    let first = today - days + 1;
+    let rows = sqlx::query(
+        "SELECT day, metric, value FROM daily_stats WHERE day >= ? AND day <= ? AND (metric LIKE 'active:%' OR metric LIKE 'reg:%')",
+    )
+    .bind(first)
+    .bind(today)
+    .fetch_all(&st.db)
+    .await?;
+    #[derive(Default)]
+    struct Totals {
+        active_today: i64,
+        active_days: i64,
+        registrations: i64,
+    }
+    let mut by_country: std::collections::BTreeMap<String, Totals> = Default::default();
+    for r in &rows {
+        let (metric, day, value) = (r.string("metric"), r.i64("day"), r.i64("value"));
+        let Some((kind, country)) = metric.split_once(':') else { continue };
+        let t = by_country.entry(country.to_string()).or_default();
+        match kind {
+            "active" => {
+                t.active_days += value;
+                if day == today {
+                    t.active_today += value;
+                }
+            }
+            "reg" => t.registrations += value,
+            _ => {}
+        }
+    }
+    let mut items: Vec<(String, Totals)> = by_country.into_iter().collect();
+    items.sort_by(|a, b| b.1.active_days.cmp(&a.1.active_days).then(b.1.registrations.cmp(&a.1.registrations)).then(a.0.cmp(&b.0)));
+    let items: Vec<Value> = items
+        .into_iter()
+        .map(|(country, t)| json!({"country": country, "active_today": t.active_today, "active_days": t.active_days, "registrations": t.registrations}))
+        .collect();
+    Ok(reply(
+        StatusCode::OK,
+        json!({"enabled": st.geoip.enabled(), "days": days, "items": items, "attribution": "IP Geolocation by DB-IP (https://db-ip.com)"}),
+    ))
 }
 
 // --- GET /stats ----------------------------------------------------------------------------

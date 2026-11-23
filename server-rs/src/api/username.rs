@@ -115,6 +115,10 @@ pub async fn set_username(State(st): State<AppState>, p: Principal, body: Body) 
         return Ok(no_content());
     }
     if let Some(v) = &value {
+        // Kept free by the operator (names that would pass for the service itself).
+        if crate::admin::usernames::is_blocked(&mut tx, v).await? {
+            return Err(conflict("this username is not available"));
+        }
         // Released recently by someone else: still theirs.
         let reserved = sqlx::query!(
             "SELECT account_id AS `account_id: String` FROM username_reservations WHERE username = ? AND expires_at >= ?",

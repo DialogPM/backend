@@ -8,6 +8,7 @@ mod api;
 mod auth;
 mod config;
 mod db;
+mod geoip;
 mod error;
 mod ids;
 mod jobs;
@@ -228,6 +229,9 @@ async fn run() -> Result<(), String> {
         Some(Arc::new(apns))
     };
 
+    // Country totals of the admin statistics: only with a local database, never a service.
+    let geoip = geoip::Shared::new(&cfg.geoip_db);
+
     let limits = if cfg.disable_rate_limits {
         warn!("rate limits are DISABLED (CHATAPP_DISABLE_RATE_LIMITS=true); never do this in production");
         ratelimit::Rules::default()
@@ -255,6 +259,7 @@ async fn run() -> Result<(), String> {
         settings: runtime_settings,
         admin,
         uploads: Default::default(),
+        geoip,
     }));
 
     let app = api::router(st.clone());
@@ -265,6 +270,8 @@ async fn run() -> Result<(), String> {
     let kt_sequencer = tokio::spawn(keytrans::run_sequencer(st.db.clone()));
     // Daily statistics (admin API) are counted in memory and written once a minute.
     let stats_flusher = tokio::spawn(metrics::run_flusher(st.db.clone(), Duration::from_secs(60)));
+    // The country database is replaced once a month (scripts/geoip-update.sh).
+    tokio::spawn(geoip::Shared::watch(st.clone()));
     // Raises the registration proof-of-work during a registration surge (adaptive_pow.rs).
     let adaptive_pow = tokio::spawn(adaptive_pow::run(st.clone()));
     info!(

@@ -207,6 +207,9 @@ pub async fn register(
     let (device_id, token) = create_device(&st, &mut tx, &account_id, device).await?;
     tx.commit().await?;
     crate::metrics::bump(crate::metrics::REGISTRATIONS, 1);
+    if let Some(country) = st.client_country(&headers, peer) {
+        crate::metrics::bump_country(crate::metrics::COUNTRY_REGISTRATIONS, country);
+    }
     info!(account = %account_id, "account registered");
     // Into the key transparency log right away, so contacts can verify the key at once.
     crate::keytrans::sequence_now(&st.db).await;

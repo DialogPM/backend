@@ -63,6 +63,9 @@ pub struct Config {
 
     /// e.g. "X-Forwarded-For" or "X-Real-IP"; empty = use the peer address.
     pub trusted_proxy_header: String,
+    /// CSV of address ranges and countries (geoip.rs) for the per-country totals of the
+    /// admin statistics; empty = no country statistics.
+    pub geoip_db: String,
     /// HTTP connections served at once (upgraded WebSockets not included); further
     /// connections wait in the listen backlog until one closes.
     pub max_connections: i64,
@@ -118,6 +121,7 @@ impl Default for Config {
             turn_credential_ttl: Duration::from_secs(3600),
             stun_urls: Vec::new(),
             trusted_proxy_header: String::new(),
+            geoip_db: String::new(),
             max_connections: 10_000,
             log_level: "info".into(),
             log_format: "text".into(),
@@ -247,6 +251,7 @@ impl Config {
         string!("CHATAPP_APNS_TOPIC", c.apns_topic);
         boolean!("CHATAPP_APNS_SANDBOX", c.apns_sandbox);
         string!("CHATAPP_TRUSTED_PROXY_HEADER", c.trusted_proxy_header);
+        string!("CHATAPP_GEOIP_DB", c.geoip_db);
         integer!("CHATAPP_MAX_CONNECTIONS", c.max_connections, 16, 1_000_000);
         if let Some(v) = lookup("CHATAPP_TURN_URLS") {
             c.turn_urls = split_list(&v);

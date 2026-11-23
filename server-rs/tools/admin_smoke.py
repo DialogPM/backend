@@ -153,8 +153,8 @@ def main():
 
     # --- settings
     st, before, _ = admin("GET", "/v1/admin/settings")
-    check("settings", st == 200 and set(before) == {"registration_enabled", "pow_bits", "max_devices",
-                                                    "attachment_max_bytes", "inactive_device_days"}, before)
+    check("settings", st == 200 and {"registration_enabled", "pow_bits", "max_devices",
+                                     "attachment_max_bytes", "inactive_device_days"} <= set(before), before)
     st, js, _ = admin("PUT", "/v1/admin/settings", {"registration_enabled": False, "max_devices": 3})
     check("put settings", st == 200 and js["max_devices"] == {"value": 3, "source": "override"}, (st, js))
     st, info, _ = raw("GET", "/v1/info")
@@ -173,6 +173,112 @@ def main():
     check("logs", st == 200 and isinstance(js["items"], list), (st, js))
     st, js, _ = admin("GET", "/v1/admin/calls")
     check("calls", st == 200 and "pushes_sent_24h" in js, (st, js))
+
+    # --- blocked usernames
+    c, d, e = register(3), register(4), register(5)
+    base = "helpdesk" + os.urandom(3).hex()  # a name nobody has in this database
+
+    def set_name(acc, name):
+        return raw("PUT", "/v1/account/username", json.dumps({"username": name}).encode(),
+                   {"Content-Type": "application/json", "Authorization": "Bearer " + acc["token"]})
+
+    def name_of(acc):
+        return admin("GET", "/v1/admin/accounts/" + acc["account_id"])[1].get("username")
+
+    for acc, name in ((c, base), (d, base + ".01"), (e, base + "_team")):
+        st, js, _ = set_name(acc, name)
+        check("take " + name, st == 204, (st, js))
+    st, js, _ = admin("GET", "/v1/admin/usernames/matches?pattern=" + base)
+    check("matches of a name", st == 200 and js["count"] == 2 and sorted(js["usernames"]) == [base, base + ".01"], (st, js))
+    st, js, _ = raw("GET", "/v1/admin/usernames/matches?pattern=" + base)
+    check("matches unsigned -> 401", st == 401, (st, js))
+    st, js, _ = admin("POST", "/v1/admin/usernames/block", {"pattern": "@" + base.upper()})
+    check("block a name", st == 200 and js == {"pattern": base, "released": 2}, (st, js))
+    check("holders lost the name", name_of(c) is None and name_of(d) is None, (name_of(c), name_of(d)))
+    check("another name is untouched", name_of(e) == base + "_team", name_of(e))
+    st, js, _ = set_name(c, base)
+    check("blocked name -> 409", st == 409, (st, js))
+    st, js, _ = set_name(d, base + ".02")
+    check("blocked name with a number -> 409", st == 409, (st, js))
+    st, js, _ = set_name(c, base + "er")
+    check("a longer name is free", st == 204, (st, js))
+    st, js, _ = admin("GET", "/v1/admin/usernames")
+    check("list", st == 200 and base in [i["pattern"] for i in js["items"]], (st, js))
+    st, js, _ = admin("POST", "/v1/admin/usernames/block", {"pattern": base + "*", "release": False})
+    check("block a prefix, keep holders", st == 200 and js["released"] == 0 and name_of(e) == base + "_team", (st, js, name_of(e)))
+    set_name(e, None)
+    st, js, _ = set_name(e, base + "_team")
+    check("prefix blocked -> 409", st == 409, (st, js))
+    for bad in ("ab", "*", "sup*port", "1admin"):
+        st, js, _ = admin("POST", "/v1/admin/usernames/block", {"pattern": bad})
+        check("pattern %r -> 400" % bad, st == 400, (st, js))
+    st, js, _ = admin("POST", "/v1/admin/usernames/unblock", {"pattern": base + "*"})
+    check("unblock", st == 204, (st, js))
+    st, js, _ = admin("POST", "/v1/admin/usernames/unblock", {"pattern": base + "*"})
+    check("unblock twice -> 404", st == 404, (st, js))
+    st, js, _ = set_name(e, base + "_team")
+    check("free again after unblock", st == 204, (st, js))
+    st, js, _ = admin("POST", "/v1/admin/usernames/unblock", {"pattern": base})
+    check("unblock the name", st == 204, (st, js))
+
+    # --- daily activity: calls started, active accounts, countries
+    def today(metric):
+        return admin("GET", "/v1/admin/stats?days=1")[1]["days"][-1].get(metric)
+
+    def connect(acc, ip):
+        """Opens the delivery socket (the handshake is enough) as if from `ip`; returns the status."""
+        import socket
+        u = urllib.parse.urlparse(BASE)
+        with socket.create_connection((u.hostname, u.port or 80), timeout=10) as sock:
+            sock.sendall(("GET /v1/ws HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\nX-Forwarded-For: %s\r\n"
+                          "Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\n\r\n"
+                          % (u.netloc, acc["token"], ip, b64(os.urandom(16)))).encode())
+            head = sock.recv(64).decode("latin-1")
+        return int(head.split(" ")[1]) if head.startswith("HTTP/1.1 ") else 0
+
+    def call(frm, to, call_id):
+        body = {"timestamp": int(time.time() * 1000), "call_id": call_id,
+                "messages": [{"device_id": 1, "registration_id": to["_reg"], "type": 2, "content": b64(os.urandom(64))}]}
+        return raw("PUT", "/v1/messages/" + to["account_id"], json.dumps(body).encode(),
+                   {"Content-Type": "application/json", "Authorization": "Bearer " + frm["token"]})
+
+    c["_reg"], d["_reg"] = 103, 104
+    calls0, active0 = today("calls_started"), today("active_accounts")
+    check("stats have the new counters", calls0 is not None and active0 is not None, (calls0, active0))
+    cid = "smoke-" + os.urandom(6).hex()
+    st, js, _ = call(c, d, cid)
+    check("call offer accepted", st == 200, (st, js))
+    call(c, d, cid)
+    check("one call, however often its offer is sent", today("calls_started") == calls0 + 1, (calls0, today("calls_started")))
+    call(c, d, "smoke-" + os.urandom(6).hex())
+    check("another call id is another call", today("calls_started") == calls0 + 2, today("calls_started"))
+
+    st, co, _ = admin("GET", "/v1/admin/countries?days=1")
+    check("countries", st == 200 and isinstance(co["items"], list) and "attribution" in co, (st, co))
+    by = lambda js: {i["country"]: i for i in js["items"]}
+    check("first connection of the day counts", connect(c, "5.2.200.7") == 101 and today("active_accounts") == active0 + 1,
+          (active0, today("active_accounts")))
+    connect(c, "5.3.1.1")
+    check("an account counts once a day", today("active_accounts") == active0 + 1, today("active_accounts"))
+    if co["enabled"]:
+        # tools/geoip-sample.csv: 5.2.128.0/17 is RO, 5.3.0.0/16 is DE; needs CHATAPP_TRUSTED_PROXY_HEADER.
+        after = by(admin("GET", "/v1/admin/countries?days=1")[1])
+        before = by(co)
+        ro = lambda m, k: m.get("RO", {}).get(k, 0)
+        check("counted where it first connected from", ro(after, "active_today") == ro(before, "active_today") + 1
+              and after.get("DE", {}).get("active_today", 0) == before.get("DE", {}).get("active_today", 0), after)
+        r = os.urandom
+        body = {"kdf": {"alg": "argon2id", "salt": b64(r(16)), "m": 65536, "t": 3, "p": 1},
+                "auth_key": b64(r(32)), "wrapped_account_key": b64(r(60)), "identity_key": b64(b"\x05" + r(32)),
+                "recovery_public_key": b64(r(32)), "device": {"name": "smoke geo", "platform": "desktop", "registration_id": 177}}
+        st, js, _ = raw("POST", "/v1/accounts", json.dumps(body).encode(), {"Content-Type": "application/json", "X-Forwarded-For": "5.3.1.1"})
+        after2 = by(admin("GET", "/v1/admin/countries?days=1")[1])
+        check("registration counted for its country", st == 200 and after2.get("DE", {}).get("registrations", 0)
+              == after.get("DE", {}).get("registrations", 0) + 1, (st, after2))
+        connect(js, "203.0.113.9")
+        check("an address outside the database is unknown", by(admin("GET", "/v1/admin/countries?days=1")[1]).get("ZZ", {}).get("active_today", 0) >= 1)
+    else:
+        print("skip country checks (server without CHATAPP_GEOIP_DB)")
 
     print("\n%d failure(s)" % len(FAILS))
     sys.exit(1 if FAILS else 0)

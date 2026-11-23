@@ -786,7 +786,8 @@ Rules
 
 `PUT /v1/account/username` (auth) — `{ "username": "ana.pop" }` or `{ "username": null }` to remove.
 3–32 characters `a-z 0-9 _ .`, starting with a letter, case-insensitive (stored lowercase),
-a leading `@` is ignored. `409 conflict` when taken, `400` when invalid.
+a leading `@` is ignored. `409 conflict` when taken (or kept free by the operator, see
+docs/ADMIN-API.md), `400` when invalid.
 
 `GET /v1/directory/username/{username}` (auth, rate limited like number lookups) → same shape
 as the number lookup. Every directory entry and `GET /v1/account` now include

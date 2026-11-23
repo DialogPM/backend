@@ -38,6 +38,8 @@ pub struct Inner {
     pub admin: Option<crate::admin::Admin>,
     /// Attachment uploads in progress per account.
     pub uploads: crate::api::attachments::UploadSlots,
+    /// Countries of addresses, for daily totals only (geoip.rs).
+    pub geoip: crate::geoip::Shared,
 }
 
 #[derive(Clone)]
@@ -65,6 +67,17 @@ impl Inner {
             crate::metrics::rate_limited(key);
             rate_limited(wait)
         })
+    }
+
+    /// Country of the client, for the daily totals (None without a GeoIP database).
+    pub fn client_country(&self, headers: &HeaderMap, peer: SocketAddr) -> Option<crate::geoip::Country> {
+        if !self.geoip.enabled() {
+            return None;
+        }
+        match self.client_ip(headers, peer).parse() {
+            Ok(ip) => self.geoip.country(ip),
+            Err(_) => Some(crate::geoip::UNKNOWN),
+        }
     }
 
     /// Client address, honouring the configured trusted proxy header (right-most entry of
