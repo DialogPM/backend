@@ -7,6 +7,7 @@
 pub mod auth;
 pub mod logbuf;
 pub mod moderation;
+pub mod operator;
 pub mod usernames;
 
 use std::collections::HashMap;
@@ -74,6 +75,11 @@ pub fn routes(st: &AppState) -> Router<AppState> {
         .route("/v1/admin/accounts/{id}/ban", post(ban))
         .route("/v1/admin/accounts/{id}/unban", post(unban))
         .route("/v1/admin/accounts/{id}/logout", post(logout))
+        .route("/v1/admin/accounts/{id}/badge", post(operator::set_badge))
+        .route("/v1/admin/accounts/{id}/unbadge", post(operator::remove_badge))
+        .route("/v1/admin/badges", get(operator::list_badges))
+        .route("/v1/admin/notices", get(operator::list_notices).post(operator::publish_notice))
+        .route("/v1/admin/notices/{id}/delete", post(operator::delete_notice))
         .route("/v1/admin/usernames", get(usernames::list))
         .route("/v1/admin/usernames/matches", get(usernames::matches))
         .route("/v1/admin/usernames/block", post(usernames::block))
@@ -679,6 +685,7 @@ async fn get_account(State(st): State<AppState>, Path(id): Path<String>) -> ApiR
         .fetch_one(&st.db)
         .await?
         .v;
+    let extras = operator::account_extras(&st, &id).await?;
     Ok(reply(
         StatusCode::OK,
         json!({
@@ -694,6 +701,9 @@ async fn get_account(State(st): State<AppState>, Path(id): Path<String>) -> ApiR
             "devices": devices,
             "reports_against": against,
             "reports_by": by,
+            // The key a badge is signed over, and the badge the account has (null: none).
+            "identity_key": extras["identity_key"],
+            "badge": extras["badge"],
         }),
     ))
 }

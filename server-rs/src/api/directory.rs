@@ -43,15 +43,19 @@ pub(crate) async fn write_directory_entry(st: &AppState, column: &str, value: &s
     let Some(r) = row else {
         return Err(not_found("unknown account"));
     };
-    Ok(reply(
-        StatusCode::OK,
-        json!({
-            "account_id": r.string("id"),
-            "number": r.string("number"),
-            "identity_key": r.opt_bytes("identity_key").map(|b| b64::encode(&b)),
-            "username": r.opt_string("username"),
-        }),
-    ))
+    // The badge of an official account, with the operator's signature (operator.rs): absent
+    // for everyone else.
+    let badge = super::operator::badge_of(st, &r.string("id")).await?;
+    let mut entry = json!({
+        "account_id": r.string("id"),
+        "number": r.string("number"),
+        "identity_key": r.opt_bytes("identity_key").map(|b| b64::encode(&b)),
+        "username": r.opt_string("username"),
+    });
+    if let Some(badge) = badge {
+        entry["badge"] = badge;
+    }
+    Ok(reply(StatusCode::OK, entry))
 }
 
 pub async fn by_number(
@@ -225,12 +229,16 @@ pub async fn get_profile(
     let Some(r) = row else {
         return Err(not_found("no profile"));
     };
-    Ok(reply(
-        StatusCode::OK,
-        json!({
-            "data": Some(r.data).map(|b| b64::encode(&b)),
-            "avatar_id": r.avatar_id,
-            "updated_at": r.updated_at,
-        }),
-    ))
+    let mut profile = json!({
+        "data": Some(r.data).map(|b| b64::encode(&b)),
+        "avatar_id": r.avatar_id,
+        "updated_at": r.updated_at,
+    });
+    // The badge of an official account (operator.rs), so that apps refreshing a contact's
+    // profile see it granted or removed; absent for everyone else. The apps check it against
+    // the identity key they hold for the account.
+    if let Some(badge) = super::operator::badge_of(&st, &id).await? {
+        profile["badge"] = badge;
+    }
+    Ok(reply(StatusCode::OK, profile))
 }

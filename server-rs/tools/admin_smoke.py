@@ -280,6 +280,97 @@ def main():
     else:
         print("skip country checks (server without CHATAPP_GEOIP_DB)")
 
+    # --- operator statements: official badge, notices (signed with the admin key itself)
+    def sign(text, sk=SK):
+        return b64(sk.sign(text.encode()))
+
+    def as_user(acc, method, path):
+        return raw(method, path, b"", {"Authorization": "Bearer " + acc["token"]})
+
+    now = lambda: int(time.time() * 1000)
+    sha = lambda t: hashlib.sha256(t.encode()).hexdigest()
+    st, info, _ = raw("GET", "/v1/info")
+    check("info names the operator keys", info.get("operator_keys") == [PK], info.get("operator_keys"))
+    st, acct, _ = admin("GET", "/v1/admin/accounts/" + c["account_id"])
+    check("account has its identity key and no badge", st == 200 and acct["identity_key"] and acct["badge"] is None, acct)
+
+    def badge(label, issued, key=PK, sk=SK, identity=None, account=None):
+        text = "dialog-operator-badge-v1\n%s\n%s\n%d\n%s" % (account or c["account_id"], identity or acct["identity_key"], issued, label)
+        return {"label": label, "issued_at": issued, "key": key, "signature": sign(text, sk)}
+
+    st, js, _ = admin("POST", "/v1/admin/accounts/%s/badge" % c["account_id"], badge("Dialog Support", now(), key=other_pk, sk=other))
+    check("badge signed by a key that is not an admin key -> 400", st == 400, (st, js))
+    st, js, _ = admin("POST", "/v1/admin/accounts/%s/badge" % c["account_id"], badge("Dialog Support", now(), identity=b64(b"\x05" + os.urandom(32))))
+    check("badge signed over another identity key -> 400", st == 400, (st, js))
+    st, js, _ = admin("POST", "/v1/admin/accounts/%s/badge" % c["account_id"], badge("Dialog Support", now(), account=d["account_id"]))
+    check("badge signed for another account -> 400", st == 400, (st, js))
+    st, js, _ = admin("POST", "/v1/admin/accounts/%s/badge" % c["account_id"], badge("Dialog Support", now() - 3600_000))
+    check("badge with an old time -> 400", st == 400, (st, js))
+    for bad in ("", " padded", "two\nlines", "x" * 41):
+        st, js, _ = admin("POST", "/v1/admin/accounts/%s/badge" % c["account_id"], badge(bad, now()))
+        check("badge label %r -> 400" % bad[:12], st == 400, (st, js))
+    issued = now()
+    st, js, _ = admin("POST", "/v1/admin/accounts/%s/badge" % c["account_id"], badge("Dialog Support", issued))
+    check("badge granted", st == 204, (st, js))
+    st, entry, _ = as_user(d, "GET", "/v1/directory/account/" + c["account_id"])
+    b = entry.get("badge") or {}
+    text = "dialog-operator-badge-v1\n%s\n%s\n%d\n%s" % (c["account_id"], entry.get("identity_key"), b.get("issued_at", 0), b.get("label"))
+    try:
+        SK.public_key().verify(base64.b64decode(b.get("signature", "")), text.encode())
+        verified = b.get("key") == PK and b.get("label") == "Dialog Support"
+    except Exception:
+        verified = False
+    check("directory entry carries a badge the apps can verify", st == 200 and verified, entry)
+    st, entry, _ = as_user(c, "GET", "/v1/directory/account/" + d["account_id"])
+    check("no badge on other accounts", st == 200 and "badge" not in entry, entry)
+    st, js, _ = admin("GET", "/v1/admin/badges")
+    check("badge list", st == 200 and [i["label"] for i in js["items"] if i["account_id"] == c["account_id"]] == ["Dialog Support"], js)
+    check("account shows its badge", admin("GET", "/v1/admin/accounts/" + c["account_id"])[1]["badge"] == {"label": "Dialog Support", "issued_at": issued})
+
+    def notice(target, title, body, created=None, sk=SK, key=PK, signed_body=None):
+        created = created or now()
+        text = "dialog-operator-notice-v1\n%s\n%d\n%s\n%s" % (target, created, sha(title), sha(signed_body or body))
+        return {"target": target, "title": title, "body": body, "created_at": created, "key": key, "signature": sign(text, sk)}
+
+    st, js, _ = admin("POST", "/v1/admin/notices", notice("*", "Maintenance", "Tonight at 23:00.", signed_body="Tonight at 22:00."))
+    check("notice whose text was changed after signing -> 400", st == 400, (st, js))
+    st, js, _ = admin("POST", "/v1/admin/notices", notice("*", "Maintenance", "Tonight at 23:00.", sk=other, key=other_pk))
+    check("notice signed by a key that is not an admin key -> 400", st == 400, (st, js))
+    st, js, _ = admin("POST", "/v1/admin/notices", notice("*", "Maintenance", "Tonight at 23:00.", created=now() - 3600_000))
+    check("notice with an old time -> 400", st == 400, (st, js))
+    st, js, _ = admin("POST", "/v1/admin/notices", notice("0b6c8a52-3c1e-4f0e-9a43-2d4f7d1e8b11", "Hello", "You."))
+    check("notice for an unknown account -> 404", st == 404, (st, js))
+    before = as_user(c, "GET", "/v1/notices")[1]["notices"]
+    last = before[-1]["id"] if before else 0
+    st, all_js, _ = admin("POST", "/v1/admin/notices", notice("*", "Maintenance", "Tonight at 23:00.\nSorry."))
+    check("notice for everyone published", st == 200 and all_js["id"] > last, (st, all_js))
+    st, one_js, _ = admin("POST", "/v1/admin/notices", notice(c["account_id"], "Your username", "It was removed: it looked like an official name."))
+    check("notice for one account published", st == 200 and one_js["id"] > all_js["id"], (st, one_js))
+    st, mine, _ = as_user(c, "GET", "/v1/notices?after=%d" % last)
+    check("the account gets both", st == 200 and [n["id"] for n in mine["notices"]] == [all_js["id"], one_js["id"]] and mine["more"] is False, mine)
+    n = mine["notices"][1] if len(mine["notices"]) == 2 else {}
+    try:
+        SK.public_key().verify(base64.b64decode(n.get("signature", "")),
+                               ("dialog-operator-notice-v1\n%s\n%d\n%s\n%s" % (n["target"], n["created_at"], sha(n["title"]), sha(n["body"]))).encode())
+        ok_sig = n["target"] == c["account_id"] and n["key"] == PK
+    except Exception:
+        ok_sig = False
+    check("notices carry a signature the apps can verify", ok_sig, n)
+    st, theirs, _ = as_user(d, "GET", "/v1/notices?after=%d" % last)
+    check("another account gets only the one for everyone", st == 200 and [n["id"] for n in theirs["notices"]] == [all_js["id"]], theirs)
+    st, js, _ = as_user(c, "GET", "/v1/notices?after=%d" % all_js["id"])
+    check("after an id", [n["id"] for n in js["notices"]] == [one_js["id"]], js)
+    st, js, _ = raw("GET", "/v1/notices")
+    check("notices need an account", st == 401, (st, js))
+    st, js, _ = admin("GET", "/v1/admin/notices?limit=2")
+    check("admin notice list", st == 200 and [i["id"] for i in js["items"]] == [one_js["id"], all_js["id"]] and js["items"][1]["target"] == "*", js)
+    st, js, _ = admin("POST", "/v1/admin/notices/%d/delete" % all_js["id"])
+    check("notice deleted", st == 204 and as_user(d, "GET", "/v1/notices?after=%d" % last)[1]["notices"] == [], (st, js))
+    st, js, _ = admin("POST", "/v1/admin/accounts/%s/unbadge" % c["account_id"])
+    check("badge removed", st == 204 and "badge" not in as_user(d, "GET", "/v1/directory/account/" + c["account_id"])[1], (st, js))
+    st, js, _ = admin("POST", "/v1/admin/accounts/%s/unbadge" % c["account_id"])
+    check("no badge to remove -> 404", st == 404, (st, js))
+
     print("\n%d failure(s)" % len(FAILS))
     sys.exit(1 if FAILS else 0)
 

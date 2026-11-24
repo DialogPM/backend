@@ -120,6 +120,16 @@ impl Verifier {
         }
     }
 
+    /// The configured admin keys. They also sign the operator statements (crate::operator),
+    /// which is why the apps are given them (`/v1/info`).
+    pub fn keys(&self) -> Vec<[u8; 32]> {
+        self.keys.iter().map(|(k, _)| *k).collect()
+    }
+
+    pub fn has_key(&self, key: &[u8; 32]) -> bool {
+        self.keys.iter().any(|(k, _)| k == key)
+    }
+
     /// The checks that need no body and no signature verification: well-formed headers, a
     /// configured key, a fresh timestamp. Run before the body is read, so that a request without
     /// a configured key costs neither the body read nor an Ed25519 verification.

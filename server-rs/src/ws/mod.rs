@@ -571,6 +571,15 @@ impl Hub {
         }
     }
 
+    /// Pushes an event to every connected device (an operator notice for everyone).
+    pub fn broadcast_event(&self, event: &Value) {
+        let frame = event_frame(event);
+        let all: Vec<ConnHandle> = self.state.lock().unwrap().account_conns.values().flat_map(|d| d.values().cloned()).collect();
+        for h in all {
+            h.enqueue(OutMsg::Data { text: frame.clone(), envelope_id: None });
+        }
+    }
+
     pub fn send_device_event(&self, account: &str, device: i64, event: &Value) {
         if let Some(h) = self.get(account, device) {
             h.enqueue(OutMsg::Data {

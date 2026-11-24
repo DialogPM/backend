@@ -19,6 +19,7 @@ pub mod invites;
 pub mod keytrans;
 pub mod keys;
 pub mod messages;
+pub mod operator;
 pub mod provisioning;
 pub mod push;
 pub mod sealed;
@@ -176,6 +177,7 @@ pub fn router(st: AppState) -> Router {
         .route("/v1/messages", get(messages::fetch_messages))
         // WebSocket.
         .route("/v1/ws", get(messages::websocket))
+        .route("/v1/notices", get(operator::notices))
         // Groups.
         .route(
             "/v1/groups",
@@ -365,6 +367,12 @@ async fn info(State(st): State<AppState>) -> Response {
         // Clients pin this key and verify the key transparency tree heads with it.
         "kt_public_key": crate::validate::b64::encode(&st.kt.public_key),
     });
+    // The keys that sign the operator statements (official badges, notices; operator.rs).
+    // Clients pin them at first contact. Absent while the admin API is disabled.
+    if let Some(admin) = st.admin.as_ref() {
+        let keys: Vec<String> = admin.verifier.keys().iter().map(|k| crate::validate::b64::encode(k)).collect();
+        body["operator_keys"] = keys.into();
+    }
     // The app versions the operator announces (admin settings): an app older than "latest"
     // offers its update, one older than "min" requires it. Absent when nothing is announced.
     if let Some(v) = s.client_versions_json() {

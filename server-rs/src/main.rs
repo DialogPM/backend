@@ -14,6 +14,7 @@ mod ids;
 mod jobs;
 mod keytrans;
 mod metrics;
+mod operator;
 mod push;
 mod ratelimit;
 mod sealed;

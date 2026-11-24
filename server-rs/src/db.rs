@@ -105,6 +105,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "0019_activity_stats.sql",
         include_str!("../migrations/0019_activity_stats.sql"),
     ),
+    (
+        20,
+        "0020_operator_statements.sql",
+        include_str!("../migrations/0020_operator_statements.sql"),
+    ),
 ];
 
 /// Parses a go-sql-driver style DSN (`user:pass@tcp(host:port)/db?params`) so existing
