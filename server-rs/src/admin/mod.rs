@@ -75,6 +75,7 @@ pub fn routes(st: &AppState) -> Router<AppState> {
         .route("/v1/admin/accounts/{id}/ban", post(ban))
         .route("/v1/admin/accounts/{id}/unban", post(unban))
         .route("/v1/admin/accounts/{id}/logout", post(logout))
+        .route("/v1/admin/accounts/{id}/username/remove", post(usernames::remove))
         .route("/v1/admin/accounts/{id}/badge", post(operator::set_badge))
         .route("/v1/admin/accounts/{id}/unbadge", post(operator::remove_badge))
         .route("/v1/admin/badges", get(operator::list_badges))

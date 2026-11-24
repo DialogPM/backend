@@ -10,7 +10,7 @@
 //! unless asked not to. Accounts are otherwise untouched (no ban, no logout).
 
 use axum::body::Body;
-use axum::extract::{RawQuery, State};
+use axum::extract::{Path, RawQuery, State};
 use axum::http::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
@@ -209,6 +209,49 @@ pub async fn unblock(State(st): State<AppState>, body: Body) -> ApiResult {
     }
     info!("admin unblocked a username pattern");
     Ok(no_content())
+}
+
+#[derive(Deserialize, Default)]
+struct RemoveRequest {
+    /// Also keep the name (and its numbered forms) from being taken again, by anyone.
+    #[serde(default)]
+    block: bool,
+}
+
+/// POST /v1/admin/accounts/{id}/username/remove {"block": true}: takes the username away from
+/// one account (someone calling themselves "admin"). The account is otherwise untouched (no
+/// ban, no sign-out) and can choose another name; with `block` the removed one stays unavailable.
+pub async fn remove(State(st): State<AppState>, Path(id): Path<String>, body: Body) -> ApiResult {
+    let id = crate::ids::normalize_uuid(&id).ok_or_else(|| bad_request("account id must be a UUID"))?;
+    let req: RemoveRequest = json_body(body).await?;
+    let mut tx = st.db.begin().await?;
+    let row = sqlx::query("SELECT username FROM accounts WHERE id = ? FOR UPDATE")
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| not_found("unknown account"))?;
+    let username = row.opt_string("username").ok_or_else(|| bad_request("this account has no username"))?;
+    if req.block {
+        // The name as a plain pattern (which also covers its numbered forms).
+        let pattern = pattern_of(&username)?;
+        let count = sqlx::query("SELECT COUNT(*) AS v FROM blocked_usernames").fetch_one(&mut *tx).await?.i64("v");
+        if count >= MAX_PATTERNS {
+            return Err(bad_request("too many blocked usernames"));
+        }
+        sqlx::query("INSERT INTO blocked_usernames (pattern, created_at) VALUES (?, ?) ON DUPLICATE KEY UPDATE pattern = pattern")
+            .bind(pattern.text())
+            .bind(crate::now_millis())
+            .execute(&mut *tx)
+            .await?;
+    }
+    sqlx::query("UPDATE accounts SET username = NULL WHERE id = ?").bind(&id).execute(&mut *tx).await?;
+    // A username link encrypts the name the account no longer has.
+    sqlx::query("DELETE FROM username_links WHERE account_id = ?").bind(&id).execute(&mut *tx).await?;
+    // Nothing is kept for the previous owner either.
+    sqlx::query("DELETE FROM username_reservations WHERE username = ?").bind(&username).execute(&mut *tx).await?;
+    tx.commit().await?;
+    info!(account = %id, blocked = req.block, "admin removed a username");
+    Ok(reply(StatusCode::OK, json!({"username": username, "blocked": req.block})))
 }
 
 #[cfg(test)]
