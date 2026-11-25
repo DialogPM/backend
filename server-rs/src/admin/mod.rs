@@ -5,6 +5,7 @@
 //! none), never who talks to whom, never IP addresses.
 
 pub mod auth;
+pub mod bots;
 pub mod logbuf;
 pub mod moderation;
 pub mod operator;
@@ -85,6 +86,10 @@ pub fn routes(st: &AppState) -> Router<AppState> {
         .route("/v1/admin/usernames/matches", get(usernames::matches))
         .route("/v1/admin/usernames/block", post(usernames::block))
         .route("/v1/admin/usernames/unblock", post(usernames::unblock))
+        .route("/v1/admin/bots", get(bots::list))
+        .route("/v1/admin/bots/{id}/disable", post(bots::disable))
+        .route("/v1/admin/bots/{id}/enable", post(bots::enable))
+        .route("/v1/admin/bots/{id}/delete", post(bots::delete))
         .route("/v1/admin/settings", get(get_settings).put(put_settings))
         .route("/v1/admin/queue/purge", post(purge_queue))
         .route("/v1/admin/security", get(security))

@@ -189,6 +189,7 @@ pub fn router(st: AppState) -> Router {
         .route("/v1/bots/{id}/start", post(bots::start))
         .route("/v1/bots/{id}/stop", post(bots::stop))
         .route("/v1/bots/{id}/messages", post(bots::send_to_bot))
+        .route("/v1/bots/{id}/callback", post(bots::callback))
         .route("/v1/bot-chats", get(bots::chats))
         .route("/bot/{token}/{method}", get(bots::bot_api).post(bots::bot_api))
         // Groups.

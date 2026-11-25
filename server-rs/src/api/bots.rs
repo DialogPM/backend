@@ -64,11 +64,124 @@ pub struct Command {
 #[derive(Serialize)]
 struct BotContent<'a> {
     id: &'a str,
+    /// The text, or the caption of `photo` (then possibly empty).
     text: &'a str,
     sent_at: i64,
     /// The bot asks that the message arrives without sound.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     silent: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    photo: Option<&'a Photo>,
+    /// Rows of buttons under the message.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    buttons: &'a Vec<Vec<Button>>,
+}
+
+/// A picture a bot sent: an attachment stored as the bot uploaded it (not encrypted), fetched
+/// by the recipient's devices like any attachment.
+#[derive(Serialize)]
+struct Photo {
+    id: String,
+    mime: &'static str,
+    size: i64,
+}
+
+/// A button under a bot's message: pressing it either tells the bot (`data`, which comes
+/// back in a `callback_query` update) or opens a link (`url`, https only).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Button {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "callback_data")]
+    pub data: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+const MAX_BUTTON_ROWS: usize = 8;
+const MAX_BUTTONS_PER_ROW: usize = 4;
+const MAX_BUTTON_TEXT_CHARS: usize = 40;
+/// Like Telegram's callback_data.
+const MAX_BUTTON_DATA_BYTES: usize = 64;
+const MAX_BUTTON_URL_BYTES: usize = 512;
+/// Largest picture a bot may send.
+pub const MAX_PHOTO_BYTES: usize = 10 << 20;
+
+/// The picture type by its first bytes (never by what the sender says it is).
+fn photo_mime(b: &[u8]) -> Option<&'static str> {
+    if b.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("image/jpeg")
+    } else if b.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        Some("image/png")
+    } else if b.starts_with(b"GIF87a") || b.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if b.len() >= 12 && &b[..4] == b"RIFF" && &b[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
+fn clean_buttons(rows: Vec<Vec<Button>>) -> Result<Vec<Vec<Button>>, ApiError> {
+    let rows: Vec<Vec<Button>> = rows.into_iter().filter(|r| !r.is_empty()).collect();
+    if rows.len() > MAX_BUTTON_ROWS {
+        return Err(bad_request(format!("at most {MAX_BUTTON_ROWS} rows of buttons")));
+    }
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        if row.len() > MAX_BUTTONS_PER_ROW {
+            return Err(bad_request(format!("at most {MAX_BUTTONS_PER_ROW} buttons in a row")));
+        }
+        let mut clean = Vec::with_capacity(row.len());
+        for b in row {
+            let text = clean_text("button text", &b.text, MAX_BUTTON_TEXT_CHARS, true)?.replace('\n', " ");
+            let data = b.data.filter(|d| !d.is_empty());
+            let url = b.url.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+            match (&data, &url) {
+                (Some(_), Some(_)) | (None, None) => return Err(bad_request("a button has either data or url")),
+                (Some(d), None) => {
+                    if d.len() > MAX_BUTTON_DATA_BYTES || d.chars().any(char::is_control) {
+                        return Err(bad_request(format!("button data has at most {MAX_BUTTON_DATA_BYTES} bytes and no control characters")));
+                    }
+                }
+                (None, Some(u)) => {
+                    let ok = u.len() <= MAX_BUTTON_URL_BYTES
+                        && u.starts_with("https://")
+                        && !u.chars().any(|c| c.is_control() || c.is_whitespace())
+                        && url::Url::parse(u).is_ok_and(|p| p.host_str().is_some_and(|h| !h.is_empty()) && p.username().is_empty() && p.password().is_none());
+                    if !ok {
+                        return Err(bad_request("a button url is an https address"));
+                    }
+                }
+            }
+            clean.push(Button { text, data, url });
+        }
+        out.push(clean);
+    }
+    Ok(out)
+}
+
+/// The buttons of a send: `buttons` (rows of {text, data | url}) or Telegram's
+/// `reply_markup.inline_keyboard` (rows of {text, callback_data | url}); either may be a
+/// JSON string, as query parameters are.
+fn buttons_of(params: &Params) -> Result<Vec<Vec<Button>>, ApiError> {
+    let parsed = |v: &Value| -> Result<Value, ApiError> {
+        match v {
+            Value::String(s) => serde_json::from_str(s).map_err(|_| bad_request("buttons must be JSON")),
+            v => Ok(v.clone()),
+        }
+    };
+    let rows = if let Some(v) = params.0.get("buttons") {
+        parsed(v)?
+    } else if let Some(v) = params.0.get("reply_markup") {
+        parsed(v)?.get("inline_keyboard").cloned().unwrap_or(Value::Null)
+    } else {
+        return Ok(Vec::new());
+    };
+    if rows.is_null() {
+        return Ok(Vec::new());
+    }
+    let rows: Vec<Vec<Button>> = serde_json::from_value(rows).map_err(|_| bad_request("buttons must be rows of {text, data or url}"))?;
+    clean_buttons(rows)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -318,14 +431,22 @@ pub async fn reset_token(State(st): State<AppState>, p: Principal, Path(id): Pat
 pub async fn delete(State(st): State<AppState>, p: Principal, Path(id): Path<String>) -> ApiResult {
     st.rate_limit(&format!("bot-manage:{}", p.account), st.limits.bot_manage_account)?;
     let id = owned(&st, &p, &id).await?;
-    let users = sqlx::query("SELECT account_id FROM bot_chats WHERE bot_id = ?").bind(&id).fetch_all(&st.db).await?;
-    sqlx::query("DELETE FROM bots WHERE id = ?").bind(&id).execute(&st.db).await?;
-    let event = json!({"kind": "bot_deleted", "bot_id": id});
-    for u in &users {
-        st.hub.send_event(&u.string("account_id"), 0, &event);
-    }
-    wake(&id);
+    remove(&st, &id).await?;
     Ok(no_content())
+}
+
+/// Deletes a bot and tells the people who had started it. false: no such bot.
+pub async fn remove(st: &AppState, id: &str) -> Result<bool, sqlx::Error> {
+    let users = sqlx::query("SELECT account_id FROM bot_chats WHERE bot_id = ?").bind(id).fetch_all(&st.db).await?;
+    let gone = sqlx::query("DELETE FROM bots WHERE id = ?").bind(id).execute(&st.db).await?.rows_affected() > 0;
+    if gone {
+        let event = json!({"kind": "bot_deleted", "bot_id": id});
+        for u in &users {
+            st.hub.send_event(&u.string("account_id"), 0, &event);
+        }
+        wake(id);
+    }
+    Ok(gone)
 }
 
 /// GET /v1/bots/{id}/subscribers (owner) -> {"subscribers": [{"chat_id","since","mine"}]}
@@ -529,7 +650,7 @@ pub async fn send_to_bot(State(st): State<AppState>, p: Principal, Path(id): Pat
     }
     match chat_id(&st, &bot, &p.account).await? {
         Some((chat, true)) => {
-            let seen = sqlx::query("SELECT 1 FROM bot_updates WHERE bot_id = ? AND message_id = ?")
+            let seen = sqlx::query("SELECT 1 FROM bot_updates WHERE bot_id = ? AND message_id = ? AND kind = 'message'")
                 .bind(&bot)
                 .bind(&message_id)
                 .fetch_optional(&st.db)
@@ -543,6 +664,37 @@ pub async fn send_to_bot(State(st): State<AppState>, p: Principal, Path(id): Pat
     Ok(reply(StatusCode::OK, json!({"server_timestamp": crate::now_millis()})))
 }
 
+#[derive(Deserialize)]
+struct CallbackRequest {
+    #[serde(default)]
+    message_id: String,
+    #[serde(default)]
+    data: String,
+}
+
+/// POST /v1/bots/{id}/callback {"message_id","data"} -> 204
+///
+/// The caller pressed a button of one of the bot's messages: the bot gets a `callback_query`
+/// update with the button's data. Only in a started chat.
+pub async fn callback(State(st): State<AppState>, p: Principal, Path(id): Path<String>, body: Body) -> ApiResult {
+    st.rate_limit(&format!("bot-msg:{}", p.account), st.limits.bot_message_account)?;
+    let req: CallbackRequest = parse_json(body, MAX_JSON_BODY).await?;
+    let message_id = path_uuid("message_id", &req.message_id)?;
+    if req.data.is_empty() || req.data.len() > MAX_BUTTON_DATA_BYTES || req.data.chars().any(char::is_control) {
+        return Err(bad_request("invalid button data"));
+    }
+    let r = bot_row(&st, &id).await?;
+    let bot = r.string("id");
+    if r.opt_i64("disabled_at").is_some() {
+        return Err(forbidden("this bot is disabled").with("reason", "bot_disabled"));
+    }
+    match chat_id(&st, &bot, &p.account).await? {
+        Some((chat, true)) => push_update(&st, &bot, &chat, "callback", Some(&message_id), Some(&req.data)).await?,
+        _ => return Err(forbidden("start the bot first").with("reason", "bot_not_started")),
+    }
+    Ok(no_content())
+}
+
 // ---------------------------------------------------------------------------------------
 // Bot API (the bot's script, authenticated by the token in the path).
 
@@ -552,7 +704,7 @@ fn waker(bot: &str) -> Arc<Notify> {
     WAKERS.lock().unwrap().entry(bot.to_string()).or_default().clone()
 }
 
-fn wake(bot: &str) {
+pub fn wake(bot: &str) {
     if let Some(n) = WAKERS.lock().unwrap().get(bot) {
         n.notify_waiters();
     }
@@ -575,13 +727,17 @@ struct Params(serde_json::Map<String, Value>);
 
 impl Params {
     async fn read(query: Option<&str>, body: Body) -> Result<Params, ApiError> {
+        Self::read_limited(query, body, MAX_JSON_BODY).await
+    }
+
+    async fn read_limited(query: Option<&str>, body: Body, limit: usize) -> Result<Params, ApiError> {
         let mut map = serde_json::Map::new();
         if let Some(q) = query {
             for (k, v) in url::form_urlencoded::parse(q.as_bytes()) {
                 map.insert(k.into_owned(), Value::String(v.into_owned()));
             }
         }
-        let bytes = read_body(body, MAX_JSON_BODY).await?;
+        let bytes = read_body(body, limit).await?;
         if !bytes.iter().all(|b| b.is_ascii_whitespace()) {
             match serde_json::from_slice::<Value>(&bytes) {
                 Ok(Value::Object(o)) => map.extend(o),
@@ -650,11 +806,31 @@ pub async fn bot_api(
 ) -> ApiResult {
     let ip = st.client_ip(&headers, peer);
     let bot = authenticate(&st, &token, &ip).await?;
-    let params = Params::read(query.as_deref(), body).await?;
     let id = bot.string("id");
-    match method.to_ascii_lowercase().as_str() {
+    let method = method.to_ascii_lowercase();
+    // sendPhoto with the picture itself as the body (Content-Type: image/…): the other
+    // parameters are then in the query string.
+    let raw_photo = method == "sendphoto"
+        && headers.get(axum::http::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|t| t.trim_start().starts_with("image/"));
+    let (params, photo) = if raw_photo {
+        let bytes = read_body(body, MAX_PHOTO_BYTES).await?;
+        (Params::read(query.as_deref(), Body::empty()).await?, Some(bytes.to_vec()))
+    } else {
+        (Params::read_limited(query.as_deref(), body, if method == "sendphoto" { MAX_PHOTO_BYTES * 4 / 3 + (64 << 10) } else { MAX_JSON_BODY }).await?, None)
+    };
+    match method.as_str() {
         "getme" => ok(public_json(&bot)),
         "sendmessage" => send_message(&st, &id, &params).await,
+        "sendphoto" => {
+            let bytes = match photo {
+                Some(b) => b,
+                None => {
+                    let b64 = params.str("photo").ok_or_else(|| bad_request("photo is required: the picture as the request body, or base64 in \"photo\""))?;
+                    crate::validate::b64::decode(b64.trim()).ok_or_else(|| bad_request("photo must be base64"))?
+                }
+            };
+            send_photo(&st, &id, &bot.string("owner_account_id"), &params, bytes).await
+        }
         "getupdates" => get_updates(&st, &id, &params).await,
         "getmycommands" => ok(json!(commands_of(&bot))),
         "setmycommands" => {
@@ -670,35 +846,113 @@ pub async fn bot_api(
     }
 }
 
-/// sendMessage {chat_id, text, silent?} -> {message_id, date}
+/// sendMessage {chat_id, text, silent?, buttons?} -> {message_id, date}
 ///
 /// Refused with 403 unless the chat was started by its user and is not stopped.
 async fn send_message(st: &AppState, bot: &str, params: &Params) -> ApiResult {
     let chat = params.str("chat_id").ok_or_else(|| bad_request("chat_id is required"))?;
     let text = message_text(&params.str("text").ok_or_else(|| bad_request("text is required"))?)?;
+    let buttons = buttons_of(params)?;
+    let account = chat_account(st, bot, &chat).await?;
+    deliver_bot_message(st, bot, &chat, &account, &text, None, &buttons, params).await
+}
+
+/// sendPhoto {chat_id, caption?, silent?, buttons?} + the picture -> {message_id, date}
+///
+/// JPEG, PNG, GIF or WebP of at most 10 MiB, recognized by its content. It is stored as an
+/// attachment of the bot's owner (and counts toward that account's daily upload quota).
+async fn send_photo(st: &AppState, bot: &str, owner: &str, params: &Params, bytes: Vec<u8>) -> ApiResult {
+    let chat = params.str("chat_id").ok_or_else(|| bad_request("chat_id is required"))?;
+    let caption = params.str("caption").or_else(|| params.str("text")).unwrap_or_default();
+    let caption = if caption.trim().is_empty() { String::new() } else { message_text(&caption)? };
+    let buttons = buttons_of(params)?;
+    if bytes.is_empty() {
+        return Err(bad_request("photo must not be empty"));
+    }
+    if bytes.len() > MAX_PHOTO_BYTES {
+        return Err(too_large("photo exceeds 10 MiB"));
+    }
+    let mime = photo_mime(&bytes).ok_or_else(|| bad_request("photo must be a JPEG, PNG, GIF or WebP image"))?;
+    // Before anything is stored: the chat must be one the bot may write to.
+    let account = chat_account(st, bot, &chat).await?;
+    let size = bytes.len() as i64;
+
+    let mut tx = st.db.begin().await?;
+    sqlx::query("SELECT id FROM accounts WHERE id = ? FOR UPDATE").bind(owner).fetch_optional(&mut *tx).await?;
+    let used = sqlx::query("SELECT CAST(COALESCE(SUM(size), 0) AS SIGNED) AS used FROM attachments WHERE owner_id = ? AND created_at > ?")
+        .bind(owner)
+        .bind(crate::now_millis() - 24 * 3600 * 1000)
+        .fetch_one(&mut *tx)
+        .await?
+        .i64("used");
+    if used + size > st.cfg.attachment_daily_bytes {
+        let mut e = ApiError::new(StatusCode::TOO_MANY_REQUESTS, "quota_exceeded", "daily upload quota of the bot's owner reached");
+        e.retry_after = Some(Duration::from_secs(3600));
+        return Err(e);
+    }
+    let id = ids::new_attachment_id();
+    sqlx::query("INSERT INTO attachments (id, owner_id, kind, size, state, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(&id)
+        .bind(owner)
+        .bind(super::attachments::KIND_MESSAGE)
+        .bind(size)
+        .bind(super::attachments::ATTACHMENT_UPLOADING)
+        .bind(crate::now_millis())
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    if let Err(e) = st.store.put(&id, Box::pin(std::io::Cursor::new(bytes)), size as u64).await {
+        tracing::error!(attachment = %id, error = %e, "bot photo upload to storage failed");
+        let _ = sqlx::query("DELETE FROM attachments WHERE id = ?").bind(&id).execute(&st.db).await;
+        return Err(crate::error::storage_unavailable(e));
+    }
+    sqlx::query("UPDATE attachments SET state = ?, uploaded_at = ? WHERE id = ?")
+        .bind(super::attachments::ATTACHMENT_UPLOADED)
+        .bind(crate::now_millis())
+        .bind(&id)
+        .execute(&st.db)
+        .await?;
+    let photo = Photo { id, mime, size };
+    deliver_bot_message(st, bot, &chat, &account, &caption, Some(&photo), &buttons, params).await
+}
+
+/// The account behind a chat id of `bot`, when the bot may write to it.
+async fn chat_account(st: &AppState, bot: &str, chat: &str) -> Result<String, ApiError> {
+    let row = sqlx::query("SELECT account_id, active FROM bot_chats WHERE chat_id = ? AND bot_id = ?")
+        .bind(chat)
+        .bind(bot)
+        .fetch_optional(&st.db)
+        .await?;
+    match row {
+        Some(r) if r.i64("active") == 1 => Ok(r.string("account_id")),
+        Some(_) => Err(forbidden("the user stopped the bot").with("reason", "bot_stopped")),
+        None => Err(bad_request("chat not found").with("reason", "chat_not_found")),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn deliver_bot_message(
+    st: &AppState,
+    bot: &str,
+    chat: &str,
+    account: &str,
+    text: &str,
+    photo: Option<&Photo>,
+    buttons: &Vec<Vec<Button>>,
+    params: &Params,
+) -> ApiResult {
     let silent = params.flag("silent") || params.flag("disable_notification");
     st.rate_limit(&format!("bot-send:{bot}"), st.limits.bot_send)?;
     st.rate_limit(&format!("bot-send:{bot}:{chat}"), st.limits.bot_send_chat)?;
 
-    let row = sqlx::query("SELECT account_id, active FROM bot_chats WHERE chat_id = ? AND bot_id = ?")
-        .bind(&chat)
-        .bind(bot)
-        .fetch_optional(&st.db)
-        .await?;
-    let account = match row {
-        Some(r) if r.i64("active") == 1 => r.string("account_id"),
-        Some(_) => return Err(forbidden("the user stopped the bot").with("reason", "bot_stopped")),
-        None => return Err(bad_request("chat not found").with("reason", "chat_not_found")),
-    };
-
     let now = crate::now_millis();
     let message_id = ids::new_uuid();
-    let content = serde_json::to_vec(&BotContent { id: &message_id, text: &text, sent_at: now, silent }).expect("bot content serializes");
+    let content = serde_json::to_vec(&BotContent { id: &message_id, text, sent_at: now, silent, photo, buttons }).expect("bot content serializes");
     let mut tx = st.db.begin().await?;
-    if sqlx::query("SELECT id FROM accounts WHERE id = ? FOR SHARE").bind(&account).fetch_optional(&mut *tx).await?.is_none() {
+    if sqlx::query("SELECT id FROM accounts WHERE id = ? FOR SHARE").bind(account).fetch_optional(&mut *tx).await?.is_none() {
         return Err(bad_request("chat not found").with("reason", "chat_not_found"));
     }
-    let devices = messages::device_registrations(&mut tx, &account).await?;
+    let devices = messages::device_registrations(&mut tx, account).await?;
     let mut envs: Vec<Envelope> = devices
         .keys()
         .map(|d| Envelope {
@@ -711,7 +965,7 @@ async fn send_message(st: &AppState, bot: &str, params: &Params) -> ApiResult {
             timestamp: now,
             server_timestamp: now,
             content: content.clone(),
-            dest_account: account.clone(),
+            dest_account: account.to_string(),
         })
         .collect();
     messages::drop_for_full_queues(&mut tx, &mut envs).await?;
@@ -726,6 +980,12 @@ fn update_json(r: &MySqlRow) -> Value {
     let id = r.i64("update_id");
     match r.string("kind").as_str() {
         "stopped" => json!({"update_id": id, "chat_stopped": {"chat": chat, "date": r.i64("created_at") / 1000}}),
+        "callback" => json!({"update_id": id, "callback_query": {
+            "chat": chat,
+            "message_id": r.opt_string("message_id"),
+            "data": r.opt_string("body").unwrap_or_default(),
+            "date": r.i64("created_at") / 1000,
+        }}),
         _ => json!({"update_id": id, "message": {
             "message_id": r.opt_string("message_id"),
             "chat": chat,
@@ -815,6 +1075,36 @@ mod tests {
         assert!(clean_commands(vec![Command { command: "a b".into(), description: String::new() }]).is_err());
         let twice = vec![Command { command: "a".into(), description: String::new() }; 2];
         assert!(clean_commands(twice).is_err());
+    }
+
+    #[test]
+    fn photos_by_content() {
+        assert_eq!(photo_mime(&[0xFF, 0xD8, 0xFF, 0xE0, 0, 0]), Some("image/jpeg"));
+        assert_eq!(photo_mime(b"\x89PNG\r\n\x1a\nrest"), Some("image/png"));
+        assert_eq!(photo_mime(b"GIF89a..."), Some("image/gif"));
+        assert_eq!(photo_mime(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
+        assert_eq!(photo_mime(b"<svg xmlns"), None);
+        assert_eq!(photo_mime(b"#!/bin/sh"), None);
+        assert_eq!(photo_mime(b""), None);
+    }
+
+    #[test]
+    fn buttons() {
+        let b = |text: &str, data: Option<&str>, url: Option<&str>| Button { text: text.into(), data: data.map(Into::into), url: url.map(Into::into) };
+        let rows = clean_buttons(vec![vec![b(" Yes ", Some("y"), None), b("Site", None, Some("https://example.org/x"))], vec![]]).unwrap();
+        assert_eq!(rows, vec![vec![b("Yes", Some("y"), None), b("Site", None, Some("https://example.org/x"))]]);
+        assert!(clean_buttons(vec![vec![b("x", None, None)]]).is_err(), "neither data nor url");
+        assert!(clean_buttons(vec![vec![b("x", Some("d"), Some("https://example.org"))]]).is_err(), "both");
+        assert!(clean_buttons(vec![vec![b("", Some("d"), None)]]).is_err());
+        for url in ["http://example.org", "javascript:alert(1)", "https://", "https://user:pw@example.org", "https://exa mple.org"] {
+            assert!(clean_buttons(vec![vec![b("x", None, Some(url))]]).is_err(), "{url}");
+        }
+        assert!(clean_buttons(vec![vec![b("x", Some(&"d".repeat(65)), None)]]).is_err());
+        assert!(clean_buttons(vec![vec![b("x", Some("d"), None); 5]]).is_err());
+        assert!(clean_buttons(vec![vec![b("x", Some("d"), None)]; 9]).is_err());
+        // Telegram's spelling of a button's data.
+        let t: Button = serde_json::from_str(r#"{"text":"Ok","callback_data":"ok"}"#).unwrap();
+        assert_eq!(t, b("Ok", Some("ok"), None));
     }
 
     #[test]
