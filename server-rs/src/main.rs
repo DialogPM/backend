@@ -36,8 +36,6 @@ use tracing::{debug, info, warn};
 use crate::config::Config;
 use crate::state::{AppState, Inner};
 
-const JOB_INTERVAL: Duration = Duration::from_secs(600);
-
 pub fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -266,7 +264,7 @@ async fn run() -> Result<(), String> {
     let app = api::router(st.clone());
     let addr = listen_addr(&cfg.listen_addr);
     let listener = bind(&addr).map_err(|e| format!("listen {addr}: {e}"))?;
-    let jobs = tokio::spawn(jobs::run(st.clone(), JOB_INTERVAL));
+    let jobs = tokio::spawn(jobs::run(st.clone(), Duration::from_secs(cfg.job_interval_seconds as u64)));
     // Key transparency: backfills accounts without a log entry, then keeps up.
     let kt_sequencer = tokio::spawn(keytrans::run_sequencer(st.db.clone()));
     // Daily statistics (admin API) are counted in memory and written once a minute.

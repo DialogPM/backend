@@ -1,5 +1,5 @@
 //! Periodic background maintenance (expiry of envelopes, codes, challenges, attachments,
-//! inactive devices).
+//! inactive devices, inactive accounts).
 
 use std::time::Duration;
 
@@ -13,6 +13,8 @@ use crate::state::AppState;
 const STALE_UPLOAD_AGE_MS: i64 = 24 * 3600 * 1000;
 const CLEANUP_BATCH: i64 = 5000;
 const DAY_MS: i64 = 86_400_000;
+/// Inactive accounts deleted per run at most (each one is a transaction of its own).
+const INACTIVE_ACCOUNT_BATCH: i64 = 200;
 
 pub async fn run(st: AppState, interval: Duration) {
     let mut t = tokio::time::interval(interval);
@@ -78,6 +80,7 @@ pub async fn run_once(st: &AppState) {
         ("DELETE FROM login_requests WHERE expires_at < ? LIMIT ?", "login requests"),
         ("DELETE FROM registration_challenges WHERE expires_at < ? LIMIT ?", "registration challenges"),
         ("DELETE FROM username_reservations WHERE expires_at < ? LIMIT ?", "username reservations"),
+        ("DELETE FROM account_restore_challenges WHERE expires_at < ? LIMIT ?", "restore challenges"),
     ] {
         match delete_batched(st, query, now).await {
             Ok(n) if n > 0 => debug!(count = n, what, "expired"),
@@ -91,6 +94,14 @@ pub async fn run_once(st: &AppState) {
             Ok(n) if n > 0 => info!(count = n, "unlinked inactive devices"),
             Ok(_) => {}
             Err(e) => warn!(error = %e, "unlink inactive devices failed"),
+        }
+    }
+
+    if st.cfg.inactive_account_deletion {
+        match delete_inactive_accounts(st, now).await {
+            Ok(n) if n > 0 => info!(count = n, "deleted inactive accounts"),
+            Ok(_) => {}
+            Err(e) => warn!(error = %e, "delete inactive accounts failed"),
         }
     }
 
@@ -211,6 +222,43 @@ async fn unlink_inactive_devices(st: &AppState, cutoff: i64) -> Result<usize, sq
         st.hub
             .send_event(&account, device, &serde_json::json!({"kind": "devices_changed"}));
         info!(account = %account, device, "unlinked inactive device");
+    }
+    Ok(n)
+}
+
+/// Deletes the accounts none of whose devices connected for the period their user chose
+/// (accounts.inactive_delete_days; 0 = never), the same way DELETE /v1/account does. Banned
+/// accounts are kept: deleting one would lift its ban.
+async fn delete_inactive_accounts(st: &AppState, now: i64) -> Result<usize, sqlx::Error> {
+    let due = crate::api::query_strings(
+        &st.db,
+        sqlx::query(
+            "SELECT id FROM accounts
+             WHERE inactive_delete_days > 0 AND banned_at IS NULL
+               AND GREATEST(last_active_at, created_at) + inactive_delete_days * 86400000 < ?
+             ORDER BY last_active_at LIMIT ?",
+        )
+        .bind(now)
+        .bind(INACTIVE_ACCOUNT_BATCH),
+    )
+    .await?;
+    let mut n = 0;
+    for account in due {
+        // Activity is recorded when a device authenticates and when its socket closes: an
+        // account with a socket that stayed open all this time is active now.
+        if !st.hub.connected_devices(&account).is_empty() {
+            sqlx::query("UPDATE accounts SET last_active_at = ? WHERE id = ?")
+                .bind(now)
+                .bind(&account)
+                .execute(&st.db)
+                .await?;
+            continue;
+        }
+        match crate::api::accounts::delete_account_data(st, &account, crate::api::accounts::Deletion::Inactive { now }).await {
+            Ok(true) => n += 1,
+            Ok(false) => {}
+            Err(e) => warn!(account = %account, error = %e.message, "delete inactive account failed"),
+        }
     }
     Ok(n)
 }

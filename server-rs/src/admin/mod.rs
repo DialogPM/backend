@@ -638,6 +638,7 @@ async fn search_accounts(State(st): State<AppState>, RawQuery(q): RawQuery) -> A
 
 /// One row of the account list / search results.
 const ACCOUNT_ROW_SQL: &str = "SELECT a.id, a.number, a.username, a.created_at, a.banned_at,
+        a.inactive_delete_days, a.last_active_at,
         (SELECT COUNT(*) FROM devices d WHERE d.account_id = a.id) AS devices,
         (SELECT MAX(d.last_seen_at) FROM devices d WHERE d.account_id = a.id) AS last_seen_at
      FROM accounts a";
@@ -651,7 +652,19 @@ fn account_row_json(r: &sqlx::mysql::MySqlRow) -> Value {
         "banned_at": r.opt_i64("banned_at"),
         "devices": r.i64("devices"),
         "last_seen_at": r.opt_i64("last_seen_at"),
+        "last_active_at": r.i64("last_active_at").max(r.i64("created_at")),
+        "inactive_delete_days": r.i64("inactive_delete_days"),
+        "inactive_delete_at": inactive_delete_at(r),
     })
+}
+
+/// When the account is deleted for inactivity if it stays away (null: never, also for banned
+/// accounts, which the job keeps).
+fn inactive_delete_at(r: &sqlx::mysql::MySqlRow) -> Option<i64> {
+    if r.opt_i64("banned_at").is_some() {
+        return None;
+    }
+    crate::api::accounts::inactive_delete_at(r.i64("inactive_delete_days"), r.i64("last_active_at"), r.i64("created_at"))
 }
 
 async fn get_account(State(st): State<AppState>, Path(id): Path<String>) -> ApiResult {
@@ -692,6 +705,11 @@ async fn get_account(State(st): State<AppState>, Path(id): Path<String>) -> ApiR
         .await?
         .v;
     let extras = operator::account_extras(&st, &id).await?;
+    let inactivity = sqlx::query("SELECT inactive_delete_days, last_active_at, created_at, banned_at FROM accounts WHERE id = ?")
+        .bind(&id)
+        .fetch_optional(&st.db)
+        .await?
+        .ok_or_else(|| not_found("unknown account"))?;
     Ok(reply(
         StatusCode::OK,
         json!({
@@ -704,6 +722,9 @@ async fn get_account(State(st): State<AppState>, Path(id): Path<String>) -> ApiR
             "login_approval": r.login_approval,
             "totp_enabled": r.totp_enabled != 0,
             "discoverable": r.discoverable_by_phone,
+            "last_active_at": inactivity.i64("last_active_at").max(inactivity.i64("created_at")),
+            "inactive_delete_days": inactivity.i64("inactive_delete_days"),
+            "inactive_delete_at": inactive_delete_at(&inactivity),
             "devices": devices,
             "reports_against": against,
             "reports_by": by,

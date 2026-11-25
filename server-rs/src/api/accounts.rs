@@ -102,6 +102,12 @@ pub async fn create_device(
     )
     .execute(&mut **tx)
     .await?;
+    // A new device (registration, login, recovery, link) is activity of the account.
+    sqlx::query("UPDATE accounts SET last_active_at = ? WHERE id = ?")
+        .bind(now)
+        .bind(account)
+        .execute(&mut **tx)
+        .await?;
     crate::metrics::bump(crate::metrics::NEW_DEVICES, 1);
     Ok((device_id, token))
 }
@@ -402,6 +408,21 @@ pub async fn recover_challenge(
         .fetch_optional(&st.db)
         .await?;
     // Unknown number: return a random challenge and store nothing.
+    if row.is_none() && restorable(&st, &req.number).await?.is_some() {
+        // Deleted for inactivity: the recovery phrase restores the account.
+        let now = crate::now_millis();
+        sqlx::query("DELETE FROM account_restore_challenges WHERE number = ? AND expires_at < ?")
+            .bind(&req.number)
+            .bind(now)
+            .execute(&st.db)
+            .await?;
+        sqlx::query("INSERT INTO account_restore_challenges (challenge, number, expires_at) VALUES (?, ?, ?)")
+            .bind(&challenge)
+            .bind(&req.number)
+            .bind(now + RECOVERY_CHALLENGE_TTL_MS)
+            .execute(&st.db)
+            .await?;
+    }
     if let Some(row) = row {
         let account_id = row.id;
         let now = crate::now_millis();
@@ -507,7 +528,7 @@ pub async fn recover(
     let device = DeviceInfo::validate(req.device.as_ref())?;
     let failed = || unauthorized("recovery failed");
     let Some(acct) = load_account_by_number(&st, &req.number).await? else {
-        return Err(failed());
+        return restore_deleted(&st, &req, &kdf, device).await;
     };
 
     // Consume the challenge first: it is single-use even if the signature is wrong.
@@ -540,12 +561,107 @@ pub async fn recover(
     ))
 }
 
+/// What is kept of an account deleted for inactivity (account_numbers), to restore it.
+struct Restorable {
+    account_id: String,
+    recovery_public_key: Vec<u8>,
+    identity_key: Vec<u8>,
+}
+
+async fn restorable(st: &AppState, number: &str) -> Result<Option<Restorable>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT account_id, recovery_public_key, identity_key FROM account_numbers
+         WHERE number = ? AND deleted_at IS NOT NULL AND recovery_public_key IS NOT NULL AND identity_key IS NOT NULL",
+    )
+    .bind(number)
+    .fetch_optional(&st.db)
+    .await?;
+    Ok(row.map(|r| Restorable {
+        account_id: r.string("account_id"),
+        recovery_public_key: r.bytes("recovery_public_key"),
+        identity_key: r.bytes("identity_key"),
+    }))
+}
+
+/// Recovery of an account that was deleted for inactivity: the recovery phrase creates it
+/// again with the same number, account id and identity key, a new password and one device.
+/// Nothing else comes back (the server deleted it): profile, username, groups, bots, vault.
+async fn restore_deleted(st: &AppState, req: &RecoverRequest, kdf: &str, device: &DeviceInfo) -> ApiResult {
+    let failed = || unauthorized("recovery failed");
+    // Single-use, also when the signature is wrong.
+    let res = sqlx::query("DELETE FROM account_restore_challenges WHERE challenge = ? AND number = ? AND expires_at >= ?")
+        .bind(&req.challenge)
+        .bind(&req.number)
+        .bind(crate::now_millis())
+        .execute(&st.db)
+        .await?;
+    if res.rows_affected() != 1 {
+        return Err(failed());
+    }
+    let Some(old) = restorable(st, &req.number).await? else {
+        return Err(failed());
+    };
+    let mut msg = RECOVERY_CONTEXT.as_bytes().to_vec();
+    msg.extend_from_slice(&req.challenge);
+    if !ed25519::verify(&old.recovery_public_key, &msg, &req.signature) {
+        return Err(failed());
+    }
+
+    let mut tx = st.db.begin().await?;
+    // Under the lock of the number: two restores at once create one account.
+    let still = sqlx::query("SELECT deleted_at FROM account_numbers WHERE number = ? AND recovery_public_key IS NOT NULL FOR UPDATE")
+        .bind(&req.number)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if !still.is_some_and(|r| r.opt_i64("deleted_at").is_some()) {
+        return Err(failed());
+    }
+    let now = crate::now_millis();
+    sqlx::query(
+        "INSERT INTO accounts
+         (id, number, auth_key_hash, kdf, wrapped_account_key, identity_key, recovery_public_key, created_at, last_active_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&old.account_id)
+    .bind(&req.number)
+    .bind(hash_auth_key(&req.auth_key))
+    .bind(kdf)
+    .bind(&req.wrapped_account_key)
+    .bind(&old.identity_key)
+    .bind(&old.recovery_public_key)
+    .bind(now)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE account_numbers SET deleted_at = NULL, recovery_public_key = NULL, identity_key = NULL WHERE number = ?")
+        .bind(&req.number)
+        .execute(&mut *tx)
+        .await?;
+    let (device_id, token) = create_device(st, &mut tx, &old.account_id, device).await?;
+    tx.commit().await?;
+    info!(account = %old.account_id, "account restored after its deletion for inactivity");
+    crate::keytrans::sequence_now(&st.db).await;
+    Ok(reply(
+        StatusCode::OK,
+        json!({
+            "account_id": old.account_id,
+            "number": req.number,
+            "device_id": device_id,
+            "token": token,
+            "wrapped_account_key": b64::encode(&req.wrapped_account_key),
+            "identity_key": b64::encode(&old.identity_key),
+        }),
+    ))
+}
+
 /// GET /v1/account body (keys in Go's sorted map order).
 #[derive(Serialize)]
 struct AccountView {
     account_id: String,
     created_at: i64,
     discoverable_by_phone: bool,
+    /// Days without any connection after which the account is deleted; 0 = never.
+    inactive_delete_days: i64,
     kdf: Box<RawValue>,
     login_approval: bool,
     number: String,
@@ -573,6 +689,11 @@ pub async fn get_account(State(st): State<AppState>, p: Principal) -> ApiResult 
         return Err(unauthorized("account not found"));
     };
     let totp_enabled = totp_enabled(&st, &p.account).await?;
+    let inactive_delete_days = sqlx::query("SELECT inactive_delete_days FROM accounts WHERE id = ?")
+        .bind(&p.account)
+        .fetch_optional(&st.db)
+        .await?
+        .map_or(DEFAULT_INACTIVE_DELETE_DAYS, |r| r.i64("inactive_delete_days"));
     let phone = row.phone;
     Ok(reply(
         StatusCode::OK,
@@ -580,6 +701,7 @@ pub async fn get_account(State(st): State<AppState>, p: Principal) -> ApiResult 
             account_id: p.account.clone(),
             created_at: row.created_at,
             discoverable_by_phone: row.discoverable_by_phone,
+            inactive_delete_days,
             // Lets a logged-in device notice a password change made on another device. The
             // wrapped key is useless without the password (and the device already has the key).
             kdf: raw_json(row.kdf)?,
@@ -702,26 +824,93 @@ struct AuthKeyRequest {
     auth_key: Vec<u8>,
 }
 
+/// The periods a user may choose for the deletion of their inactive account, in days
+/// (0 = never). New accounts start with [`DEFAULT_INACTIVE_DELETE_DAYS`].
+pub const INACTIVE_DELETE_CHOICES: [i64; 8] = [30, 60, 90, 365, 730, 1095, 1825, 0];
+pub const DEFAULT_INACTIVE_DELETE_DAYS: i64 = 365;
+const DAY_MS: i64 = 86_400_000;
+
+/// When an account with this period and last activity is deleted if it stays away (ms);
+/// None = never. The maintenance job deletes it on its first run after that moment.
+pub fn inactive_delete_at(days: i64, last_active_at: i64, created_at: i64) -> Option<i64> {
+    (days > 0).then(|| last_active_at.max(created_at) + days * DAY_MS)
+}
+
+#[derive(Deserialize)]
+struct InactiveDeletionRequest {
+    #[serde(default)]
+    days: Option<i64>,
+}
+
+/// PUT /v1/account/inactive-deletion {"days": 30|60|90|365|730|1095|1825|0}
+pub async fn set_inactive_deletion(State(st): State<AppState>, p: Principal, body: Body) -> ApiResult {
+    let req: InactiveDeletionRequest = parse_json(body, MAX_JSON_BODY).await?;
+    let Some(days) = req.days.filter(|d| INACTIVE_DELETE_CHOICES.contains(d)) else {
+        return Err(bad_request("days must be one of 30, 60, 90, 365, 730, 1095, 1825 or 0 (never)"));
+    };
+    // The request itself is activity: a shorter period never deletes the account at once.
+    sqlx::query("UPDATE accounts SET inactive_delete_days = ?, last_active_at = ? WHERE id = ?")
+        .bind(days)
+        .bind(crate::now_millis())
+        .bind(&p.account)
+        .execute(&st.db)
+        .await?;
+    Ok(reply(StatusCode::OK, json!({"inactive_delete_days": days})))
+}
+
 pub async fn delete_account(State(st): State<AppState>, p: Principal, body: Body) -> ApiResult {
     let req: AuthKeyRequest = parse_json(body, MAX_JSON_BODY).await?;
     verify_auth_key(&st, &st.db, &p.account, &req.auth_key, false).await?;
     // Not tied to the request: the deletion completes even if the client goes away.
     let st2 = st.clone();
-    tokio::spawn(async move { delete_account_data(&st2, &p.account, &req.auth_key).await })
-        .await
-        .map_err(|e| internal_from("delete account task", e))??;
+    tokio::spawn(async move {
+        delete_account_data(&st2, &p.account, Deletion::Requested { auth_key: &req.auth_key }).await
+    })
+    .await
+    .map_err(|e| internal_from("delete account task", e))??;
     Ok(no_content())
 }
 
+/// Why an account is deleted: decides what is checked under the lock of the account's row.
+pub(crate) enum Deletion<'a> {
+    /// DELETE /v1/account: the password is checked again.
+    Requested { auth_key: &'a [u8] },
+    /// The maintenance job (jobs.rs): the account must still be due at `now`.
+    Inactive { now: i64 },
+}
+
 /// Removes the account and everything it owns. The account number stays in account_numbers
-/// (tombstone) so it is never reused.
-async fn delete_account_data(
+/// (tombstone) so it is never reused; of an account deleted for inactivity the tombstone also
+/// keeps the public keys its recovery phrase can restore it with. Ok(false): an inactive account that is no longer due
+/// (it came back, changed its period or is gone already); nothing was deleted.
+pub(crate) async fn delete_account_data(
     st: &AppState,
     account: &str,
-    auth_key: &[u8],
-) -> Result<(), ApiError> {
+    why: Deletion<'_>,
+) -> Result<bool, ApiError> {
     let mut tx = st.db.begin().await?;
-    verify_auth_key(st, &mut *tx, account, auth_key, true).await?;
+    let reason = match why {
+        Deletion::Requested { auth_key } => {
+            verify_auth_key(st, &mut *tx, account, auth_key, true).await?;
+            "requested"
+        }
+        Deletion::Inactive { now } => {
+            let row = sqlx::query(
+                "SELECT inactive_delete_days, last_active_at, created_at, banned_at FROM accounts WHERE id = ? FOR UPDATE",
+            )
+            .bind(account)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some(row) = row else {
+                return Ok(false);
+            };
+            let due = inactive_delete_at(row.i64("inactive_delete_days"), row.i64("last_active_at"), row.i64("created_at"));
+            if !due.is_some_and(|at| at < now) || row.opt_i64("banned_at").is_some() {
+                return Ok(false);
+            }
+            "inactive"
+        }
+    };
     let attachments = query_strings(
         &mut *tx,
         sqlx::query("SELECT id FROM attachments WHERE owner_id = ?").bind(account),
@@ -748,6 +937,17 @@ async fn delete_account_data(
     sqlx::query!("UPDATE account_numbers SET deleted_at = ? WHERE account_id = ?", crate::now_millis(), account)
         .execute(&mut *tx)
         .await?;
+    if reason == "inactive" {
+        // What the recovery phrase is checked against to restore the account (`restore_deleted`).
+        sqlx::query(
+            "UPDATE account_numbers n JOIN accounts a ON a.id = n.account_id
+             SET n.recovery_public_key = a.recovery_public_key, n.identity_key = a.identity_key
+             WHERE a.id = ?",
+        )
+        .bind(account)
+        .execute(&mut *tx)
+        .await?;
+    }
     // The account's other devices wipe themselves.
     super::devices::record_revocations(&mut tx, account, None).await?;
     // Cascades to devices, keys, envelopes, profile, vault, phone codes, challenges,
@@ -771,11 +971,12 @@ async fn delete_account_data(
     }
     info!(
         account,
+        reason,
         groups = changes.len(),
         attachments = attachments.len(),
         "account deleted"
     );
-    Ok(())
+    Ok(true)
 }
 
 #[derive(Deserialize)]
@@ -945,6 +1146,7 @@ mod ed25519 {
     mod tests {
         use ed25519_dalek::{Signer, SigningKey};
 
+
         #[test]
         fn verifies() {
             let sk = SigningKey::from_bytes(&[7u8; 32]);
@@ -954,5 +1156,20 @@ mod ed25519 {
             assert!(!super::verify(&pk, b"other", &sig.to_bytes()));
             assert!(!super::verify(&pk[..31], b"challenge", &sig.to_bytes()));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inactive_deletion_date() {
+        assert!(INACTIVE_DELETE_CHOICES.contains(&DEFAULT_INACTIVE_DELETE_DAYS));
+        // Never.
+        assert_eq!(inactive_delete_at(0, 1_000, 500), None);
+        assert_eq!(inactive_delete_at(30, 1_000, 500), Some(1_000 + 30 * DAY_MS));
+        // An account that never recorded activity counts from its creation.
+        assert_eq!(inactive_delete_at(365, 0, 500), Some(500 + 365 * DAY_MS));
     }
 }

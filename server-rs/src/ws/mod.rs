@@ -319,6 +319,8 @@ impl Hub {
         {
             warn!(error = %e, "touch device failed");
         }
+        // A socket that stayed open for days: the account was active until now.
+        crate::auth::touch_account(&self.db, &h.account, now).await;
         if went_offline {
             if let Err(e) = sqlx::query!("UPDATE accounts SET last_seen_at = ? WHERE id = ?", now, &h.account)
                 .execute(&self.db)

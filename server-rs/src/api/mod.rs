@@ -104,6 +104,10 @@ pub fn router(st: AppState) -> Router {
         )
         .route("/v1/account/phone/verify", post(accounts::verify_phone))
         .route("/v1/account/discoverable", put(accounts::set_discoverable))
+        .route(
+            "/v1/account/inactive-deletion",
+            put(accounts::set_inactive_deletion),
+        )
         .route("/v1/account/username", put(username::set_username))
         .route(
             "/v1/account/username/link",

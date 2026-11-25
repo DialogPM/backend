@@ -31,6 +31,11 @@ pub struct Config {
     /// Linked devices not seen for this many days are unlinked (the most recently active
     /// device of an account is always kept); 0 disables.
     pub inactive_device_days: i64,
+    /// Delete accounts none of whose devices connected for the period chosen by their user
+    /// (docs/API.md, "Inactive account deletion"). Off: the choices are kept, nothing is deleted.
+    pub inactive_account_deletion: bool,
+    /// Seconds between two runs of the maintenance jobs (jobs.rs).
+    pub job_interval_seconds: i64,
     /// Leading zero bits of SHA-256 required by the registration proof-of-work; 0 disables.
     pub registration_pow_bits: i64,
     /// How long a released username stays reserved for its previous owner.
@@ -104,6 +109,8 @@ impl Default for Config {
             message_ttl_days: 30,
             vault_quota_bytes: 1 << 30,
             inactive_device_days: 30,
+            inactive_account_deletion: true,
+            job_interval_seconds: 600,
             registration_pow_bits: 20,
             username_reservation_days: 30,
             sms_provider: "log".into(),
@@ -228,6 +235,8 @@ impl Config {
             0,
             36_500
         );
+        boolean!("CHATAPP_INACTIVE_ACCOUNT_DELETION", c.inactive_account_deletion);
+        integer!("CHATAPP_JOB_INTERVAL_SECONDS", c.job_interval_seconds, 1, 86_400);
         integer!(
             "CHATAPP_REGISTRATION_POW_BITS",
             c.registration_pow_bits,

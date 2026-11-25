@@ -45,6 +45,22 @@ fn bearer_token(parts: &Parts, allow_query: bool) -> String {
     String::new()
 }
 
+/// The account's last activity is tracked to the hour (inactive account deletion counts days).
+const LAST_ACTIVE_UPDATE_INTERVAL: i64 = 3_600_000; // ms
+
+/// Records activity of `account` (docs/API.md, "Inactive account deletion").
+pub async fn touch_account(db: &sqlx::MySqlPool, account: &str, now: i64) {
+    if let Err(e) = sqlx::query("UPDATE accounts SET last_active_at = ? WHERE id = ? AND last_active_at < ?")
+        .bind(now)
+        .bind(account)
+        .bind(now - LAST_ACTIVE_UPDATE_INTERVAL)
+        .execute(db)
+        .await
+    {
+        warn!(error = %e, "update account last_active failed");
+    }
+}
+
 impl FromRequestParts<AppState> for Principal {
     type Rejection = ApiError;
 
@@ -93,6 +109,7 @@ impl FromRequestParts<AppState> for Principal {
             {
                 warn!(error = %e, "update device last_seen failed");
             }
+            touch_account(&st.db, &p.account, now).await;
         }
         Ok(p)
     }
