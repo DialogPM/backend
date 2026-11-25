@@ -130,6 +130,9 @@ pub async fn set_username(State(st): State<AppState>, p: Principal, body: Body) 
         if reserved.is_some_and(|r| r.account_id != p.account) {
             return Err(conflict("this username is taken"));
         }
+        if super::bots::username_is_bot(&mut tx, v).await? {
+            return Err(conflict("this username is taken"));
+        }
     }
     reserve_released_username(&st, &mut tx, &p.account).await?;
     match sqlx::query!("UPDATE accounts SET username = ? WHERE id = ?", &value, &p.account)

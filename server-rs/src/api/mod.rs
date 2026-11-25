@@ -9,6 +9,7 @@
 
 pub mod accounts;
 pub mod attachments;
+pub mod bots;
 pub mod calls;
 pub mod devices;
 pub mod directory;
@@ -178,6 +179,18 @@ pub fn router(st: AppState) -> Router {
         // WebSocket.
         .route("/v1/ws", get(messages::websocket))
         .route("/v1/notices", get(operator::notices))
+        // Bots (section 22): the owner's bots, talking to a bot, and the Bot API.
+        .route("/v1/bots", post(bots::create).get(bots::list))
+        .route("/v1/bots/username/{username}", get(bots::by_username))
+        .route("/v1/bots/{id}", get(bots::get).patch(bots::update).delete(bots::delete))
+        .route("/v1/bots/{id}/token", post(bots::reset_token))
+        .route("/v1/bots/{id}/subscribers", get(bots::subscribers))
+        .route("/v1/bots/{id}/send", post(bots::owner_send))
+        .route("/v1/bots/{id}/start", post(bots::start))
+        .route("/v1/bots/{id}/stop", post(bots::stop))
+        .route("/v1/bots/{id}/messages", post(bots::send_to_bot))
+        .route("/v1/bot-chats", get(bots::chats))
+        .route("/bot/{token}/{method}", get(bots::bot_api).post(bots::bot_api))
         // Groups.
         .route(
             "/v1/groups",
@@ -335,7 +348,11 @@ async fn retry_deadlocks(req: axum::extract::Request, next: axum::middleware::Ne
 
 /// Debug log of every request (never the query string: the WebSocket token may be there).
 async fn log_request(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
-    let (method, path, start) = (req.method().clone(), req.uri().path().to_string(), std::time::Instant::now());
+    let (method, mut path, start) = (req.method().clone(), req.uri().path().to_string(), std::time::Instant::now());
+    // A Bot API path carries the bot's token: never logged.
+    if let Some(rest) = path.strip_prefix("/bot/") {
+        path = format!("/bot/<token>/{}", rest.split_once('/').map(|(_, m)| m).unwrap_or(""));
+    }
     let resp = next.run(req).await;
     tracing::debug!(%method, %path, status = resp.status().as_u16(), duration_ms = start.elapsed().as_millis() as u64, "request");
     resp

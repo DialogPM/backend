@@ -238,6 +238,16 @@ pub struct Rules {
     pub provision_poll_ip: Rule,
     /// zkgroup auth credential requests per account (clients fetch a week at a time).
     pub zk_credentials_account: Rule,
+    /// Bot API calls with a token that is not a bot's, per IP.
+    pub bot_token_ip: Rule,
+    /// Messages one bot sends, all chats together.
+    pub bot_send: Rule,
+    /// Messages one bot sends to one chat.
+    pub bot_send_chat: Rule,
+    /// Messages an account sends to bots.
+    pub bot_message_account: Rule,
+    /// Bots created, changed or deleted per account.
+    pub bot_manage_account: Rule,
 }
 
 impl Rules {
@@ -279,6 +289,12 @@ impl Rules {
             // behind the same address.
             provision_poll_ip: Rule::new(1200, min(10)),
             zk_credentials_account: Rule::new(30, min(60)),
+            bot_token_ip: Rule::new(30, min(10)),
+            // 30 per second sustained, like the Telegram Bot API.
+            bot_send: Rule::new(1800, min(1)),
+            bot_send_chat: Rule::new(60, min(1)),
+            bot_message_account: Rule::new(120, min(1)),
+            bot_manage_account: Rule::new(60, min(10)),
         }
     }
 }

@@ -46,6 +46,11 @@ pub async fn run_once(st: &AppState) {
         Ok(_) => {}
         Err(e) => warn!(error = %e, "expire envelopes failed"),
     }
+    match crate::api::bots::cleanup(st).await {
+        Ok(n) if n > 0 => debug!(count = n, "expired bot updates"),
+        Ok(_) => {}
+        Err(e) => warn!(error = %e, "expire bot updates failed"),
+    }
     match delete_batched(
         st,
         "DELETE FROM recovery_challenges WHERE expires_at < ? LIMIT ?",
