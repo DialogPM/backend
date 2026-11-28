@@ -530,6 +530,20 @@ pub async fn websocket(
         Err(e) => return (StatusCode::UPGRADE_REQUIRED, e.body_text()).into_response(),
     };
     count_active(&st, &p.account, st.client_country(&headers, peer)).await;
+    // `?os=windows|macos|linux`: which system a desktop app runs on, for the admin statistics
+    // per platform. Kept on the device as that one word; anything else is ignored.
+    if let Some(os) = crate::validate::desktop_os_param(query.as_deref().unwrap_or("")) {
+        let r = sqlx::query("UPDATE devices SET os = ? WHERE account_id = ? AND device_id = ? AND platform = 'desktop' AND (os IS NULL OR os <> ?)")
+            .bind(os)
+            .bind(&p.account)
+            .bind(p.device)
+            .bind(os)
+            .execute(&st.db)
+            .await;
+        if let Err(e) = r {
+            tracing::warn!(error = %e, "store device os failed");
+        }
+    }
     let hub = st.hub.clone();
     ws.max_message_size(256 << 10)
         .on_upgrade(move |socket| hub.serve(socket, p.account, p.device, privacy == "nobody", active))

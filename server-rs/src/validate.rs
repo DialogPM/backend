@@ -289,6 +289,16 @@ impl DeviceInfo {
     }
 }
 
+/// The operating systems a desktop device may announce on the delivery socket (`?os=`).
+pub const DESKTOP_OSES: [&str; 3] = ["windows", "macos", "linux"];
+
+/// The `os` parameter of a query string, when it is one of `DESKTOP_OSES`. Anything else
+/// (missing, a version, a model name, another case) is ignored: only these words are kept.
+pub fn desktop_os_param(query: &str) -> Option<&'static str> {
+    let value = query.split('&').find_map(|kv| kv.strip_prefix("os="))?;
+    DESKTOP_OSES.into_iter().find(|os| *os == value)
+}
+
 pub fn validate_device_name(name: &str) -> Result<(), ApiError> {
     let n = name.chars().count();
     if n < 1 || n > MAX_DEVICE_NAME_LEN || name.trim().is_empty() {
@@ -403,6 +413,17 @@ mod tests {
         assert!(!valid_phone("++1234567"));
         assert!(!valid_phone(""));
         assert!(!valid_phone("+"));
+    }
+
+    #[test]
+    fn desktop_os_is_one_of_three_words() {
+        assert_eq!(desktop_os_param("os=linux"), Some("linux"));
+        assert_eq!(desktop_os_param("active=0&os=macos"), Some("macos"));
+        assert_eq!(desktop_os_param("os=windows&active=0"), Some("windows"));
+        // Nothing else is kept: no versions, no models, no other systems, no other spelling.
+        for q in ["", "active=0", "os=", "os=Linux", "os=windows11", "os=macos%2015.1", "os=android", "os=ios", "os=freebsd", "xos=linux", "os=linux;drop"] {
+            assert_eq!(desktop_os_param(q), None, "{q}");
+        }
     }
 
     #[test]

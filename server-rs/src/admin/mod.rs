@@ -69,6 +69,7 @@ pub fn routes(st: &AppState) -> Router<AppState> {
         .route("/v1/admin/overview", get(overview))
         .route("/v1/admin/stats", get(stats))
         .route("/v1/admin/countries", get(countries))
+        .route("/v1/admin/platforms", get(platforms))
         .route("/v1/admin/reports", get(list_reports))
         .route("/v1/admin/reports/{id}/resolve", post(resolve_report))
         .route("/v1/admin/accounts", get(search_accounts))
@@ -452,6 +453,85 @@ async fn countries(State(st): State<AppState>, RawQuery(q): RawQuery) -> ApiResu
         StatusCode::OK,
         json!({"enabled": st.geoip.enabled(), "days": days, "items": items, "attribution": "IP Geolocation by DB-IP (https://db-ip.com)"}),
     ))
+}
+
+// --- GET /platforms ------------------------------------------------------------------------
+
+/// The groups of `GET /platforms`, in the order they are returned. `desktop`: a desktop app
+/// that has not said its system yet (older than the `os` parameter); `other`: web and cli.
+const PLATFORM_GROUPS: [&str; 7] = ["android", "ios", "windows", "macos", "linux", "desktop", "other"];
+
+#[derive(Default, Clone, Copy, PartialEq, Debug)]
+struct PlatformTotals {
+    devices: i64,
+    new_devices: i64,
+    active_devices: i64,
+    active_accounts: i64,
+}
+
+/// One entry per group, zeros for those without devices; rows of an unknown group are dropped.
+fn platform_items(rows: &[(String, PlatformTotals)]) -> Vec<Value> {
+    PLATFORM_GROUPS
+        .iter()
+        .map(|group| {
+            let t = rows.iter().find(|(g, _)| g == group).map(|(_, t)| *t).unwrap_or_default();
+            json!({
+                "platform": group,
+                "devices": t.devices,
+                "new_devices": t.new_devices,
+                "active_devices": t.active_devices,
+                "active_accounts": t.active_accounts,
+            })
+        })
+        .collect()
+}
+
+/// Devices and accounts per platform: the linked devices as they are now, those linked in the
+/// last `days` days and the accounts seen in that time, from `devices` (platform, os,
+/// created_at, last_seen_at). An account active on two platforms counts for both.
+async fn platforms(State(st): State<AppState>, RawQuery(q): RawQuery) -> ApiResult {
+    let p = params(&q);
+    let days = int_param(&p, "days", 30, 1, 365)?;
+    // The same days as /stats: from the start of the UTC day `days - 1` days ago.
+    let since = (metrics::day_of(crate::now_millis()) - days + 1) * 86_400_000;
+    let rows = sqlx::query(
+        "SELECT g, COUNT(*) AS devices, CAST(COALESCE(SUM(is_new), 0) AS SIGNED) AS new_devices,
+                CAST(COALESCE(SUM(is_active), 0) AS SIGNED) AS active_devices,
+                COUNT(DISTINCT CASE WHEN is_active = 1 THEN account_id END) AS active_accounts
+         FROM (SELECT account_id,
+                      CASE WHEN platform = 'android' THEN 'android'
+                           WHEN platform = 'ios' THEN 'ios'
+                           WHEN platform = 'desktop' AND os IN ('windows', 'macos', 'linux') THEN os
+                           WHEN platform = 'desktop' THEN 'desktop'
+                           ELSE 'other' END AS g,
+                      created_at >= ? AS is_new, last_seen_at >= ? AS is_active
+               FROM devices) d
+         GROUP BY g",
+    )
+    .bind(since)
+    .bind(since)
+    .fetch_all(&st.db)
+    .await?;
+    let rows: Vec<(String, PlatformTotals)> = rows
+        .iter()
+        .map(|r| {
+            (
+                r.string("g"),
+                PlatformTotals {
+                    devices: r.i64("devices"),
+                    new_devices: r.i64("new_devices"),
+                    active_devices: r.i64("active_devices"),
+                    active_accounts: r.i64("active_accounts"),
+                },
+            )
+        })
+        .collect();
+    let total = sqlx::query("SELECT COUNT(DISTINCT account_id) AS n FROM devices WHERE last_seen_at >= ?")
+        .bind(since)
+        .fetch_one(&st.db)
+        .await?
+        .i64("n");
+    Ok(reply(StatusCode::OK, json!({"days": days, "active_accounts": total, "items": platform_items(&rows)})))
 }
 
 // --- GET /stats ----------------------------------------------------------------------------
@@ -876,6 +956,18 @@ async fn calls(State(st): State<AppState>) -> ApiResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn platforms_always_list_every_group() {
+        let t = |devices, new_devices, active_devices, active_accounts| PlatformTotals { devices, new_devices, active_devices, active_accounts };
+        let items = platform_items(&[("linux".into(), t(4, 1, 3, 2)), ("android".into(), t(10, 5, 8, 7)), ("bogus".into(), t(9, 9, 9, 9))]);
+        let names: Vec<&str> = items.iter().map(|i| i["platform"].as_str().unwrap()).collect();
+        assert_eq!(names, PLATFORM_GROUPS, "fixed order, unknown groups dropped");
+        assert_eq!(items[0], json!({"platform": "android", "devices": 10, "new_devices": 5, "active_devices": 8, "active_accounts": 7}));
+        assert_eq!(items[4], json!({"platform": "linux", "devices": 4, "new_devices": 1, "active_devices": 3, "active_accounts": 2}));
+        // A group without devices is there with zeros, the desktops of unknown system included.
+        assert_eq!(items[5], json!({"platform": "desktop", "devices": 0, "new_devices": 0, "active_devices": 0, "active_accounts": 0}));
+    }
 
     #[test]
     fn backup_status_file() {
